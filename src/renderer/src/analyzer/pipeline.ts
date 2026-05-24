@@ -1,0 +1,202 @@
+import type {
+  TrackAnalysis,
+  AnalysisQuality,
+  BeatGrid,
+  EnergyProfile,
+  CuePoints,
+} from '@shared/types';
+import { ANALYZER_VERSION } from '@shared/types';
+import {
+  buildBeatGrid,
+  checkBeatStability,
+  dbFromAmp,
+  energyEnvelope,
+  estimateBpmFromOnsets,
+  estimateFirstBeat,
+  mixdownToMono,
+  onsetEnvelope,
+  resample,
+  rms,
+} from './dsp';
+import { estimateKey } from './key';
+
+const ANALYSIS_RATE = 22050;
+const ENV_WINDOW = 256; // ~11ms @ 22050Hz
+const ENV_FPS = ANALYSIS_RATE / ENV_WINDOW;
+
+export interface AnalyzeInput {
+  trackId: string;
+  channels: Float32Array[];
+  sampleRate: number;
+  durationSec: number;
+}
+
+export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
+  const mono = mixdownToMono(input.channels);
+  const downsampled = resample(mono, input.sampleRate, ANALYSIS_RATE);
+
+  // Tempo
+  const env = energyEnvelope(downsampled, ENV_WINDOW);
+  const onsets = onsetEnvelope(env);
+  const { bpm: rawBpm, confidence: bpmConfidence } = estimateBpmFromOnsets(onsets, ENV_FPS);
+  const bpm = normalizeBpmOctave(rawBpm);
+
+  // Beat grid
+  const firstBeatTime = estimateFirstBeat(onsets, bpm, ENV_FPS);
+  const { beats, downbeats } = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
+  const isStable = checkBeatStability(beats);
+
+  const beatGrid: BeatGrid = {
+    firstBeatTime,
+    bpm,
+    bpmConfidence,
+    beats,
+    downbeats,
+    isStable,
+  };
+
+  // Key
+  const key = estimateKey(downsampled, ANALYSIS_RATE);
+
+  // Energy profile (per bar)
+  const energy = computeEnergyProfile(downsampled, beats);
+
+  // Cues derived from energy curve
+  const cues = computeCues(energy, beats, downbeats, input.durationSec);
+
+  const quality = scoreQuality(bpmConfidence, isStable, key.confidence);
+
+  return {
+    trackId: input.trackId,
+    analyzerVersion: ANALYZER_VERSION,
+    analyzedAt: Date.now(),
+    quality,
+    beatGrid,
+    key,
+    energy,
+    cues,
+  };
+}
+
+/**
+ * If detected BPM falls in a region that's commonly an octave error,
+ * try doubling/halving and pick the value closest to a sensible default (120).
+ */
+function normalizeBpmOctave(bpm: number): number {
+  const target = 120;
+  const candidates = [bpm];
+  if (bpm < 90) candidates.push(bpm * 2);
+  if (bpm > 160) candidates.push(bpm / 2);
+  return candidates.reduce((best, c) =>
+    Math.abs(c - target) < Math.abs(best - target) ? c : best
+  );
+}
+
+function computeEnergyProfile(samples: Float32Array, beats: number[]): EnergyProfile {
+  if (beats.length < 8) {
+    const rmsValue = rms(samples);
+    return {
+      mean: clamp01(rmsValue * 2),
+      peak: clamp01(rmsValue * 2),
+      perBar: [],
+      rmsDb: dbFromAmp(rmsValue),
+    };
+  }
+  const perBar: number[] = [];
+  for (let i = 0; i + 4 < beats.length; i += 4) {
+    const startSample = Math.floor(beats[i] * ANALYSIS_RATE);
+    const endSample = Math.floor(beats[i + 4] * ANALYSIS_RATE);
+    if (endSample <= startSample) continue;
+    perBar.push(rms(samples, startSample, Math.min(endSample, samples.length)));
+  }
+  const sorted = [...perBar].sort((a, b) => a - b);
+  const peak = sorted[sorted.length - 1] ?? 0;
+  const mean = perBar.reduce((s, v) => s + v, 0) / Math.max(1, perBar.length);
+  const overallRms = rms(samples);
+  // Normalize roughly to 0..1 (RMS rarely exceeds 0.5 on music)
+  return {
+    mean: clamp01(mean * 2),
+    peak: clamp01(peak * 2),
+    perBar: perBar.map((v) => clamp01(v * 2)),
+    rmsDb: dbFromAmp(overallRms),
+  };
+}
+
+function computeCues(
+  energy: EnergyProfile,
+  beats: number[],
+  downbeats: number[],
+  duration: number
+): CuePoints {
+  if (energy.perBar.length === 0 || downbeats.length === 0) {
+    return {
+      introStart: 0,
+      introEnd: Math.min(8, duration),
+      outroStart: Math.max(0, duration - 16),
+      outroEnd: duration,
+      mixInPoint: Math.min(8, duration),
+      mixOutPoint: Math.max(0, duration - 16),
+    };
+  }
+  const peak = energy.peak;
+  const threshold = peak * 0.45;
+  // First bar above threshold = intro end
+  let introBarIdx = energy.perBar.findIndex((v) => v >= threshold);
+  if (introBarIdx < 0) introBarIdx = 0;
+  // Last bar above threshold = outro start
+  let outroBarIdx = energy.perBar.length - 1;
+  for (let i = energy.perBar.length - 1; i >= 0; i--) {
+    if (energy.perBar[i] >= threshold) {
+      outroBarIdx = i;
+      break;
+    }
+  }
+
+  const barToTime = (idx: number): number => {
+    const beatIdx = idx * 4;
+    return beats[Math.min(beats.length - 1, beatIdx)] ?? 0;
+  };
+
+  const introEnd = barToTime(introBarIdx);
+  const outroStart = barToTime(outroBarIdx);
+  // Snap to nearest downbeat
+  const introEndDb = snapToDownbeat(introEnd, downbeats);
+  const outroStartDb = snapToDownbeat(outroStart, downbeats);
+
+  return {
+    introStart: 0,
+    introEnd: introEndDb,
+    outroStart: outroStartDb,
+    outroEnd: duration,
+    mixInPoint: introEndDb,
+    mixOutPoint: outroStartDb,
+  };
+}
+
+function snapToDownbeat(t: number, downbeats: number[]): number {
+  if (downbeats.length === 0) return t;
+  let best = downbeats[0];
+  let bestDist = Math.abs(t - best);
+  for (const db of downbeats) {
+    const d = Math.abs(t - db);
+    if (d < bestDist) {
+      bestDist = d;
+      best = db;
+    }
+  }
+  return best;
+}
+
+function scoreQuality(
+  bpmConf: number,
+  beatStable: boolean,
+  keyConf: number
+): AnalysisQuality {
+  if (bpmConf < 0.3 || !beatStable) return 'unreliable';
+  if (bpmConf < 0.55 || keyConf < 0.25) return 'partial';
+  return 'good';
+}
+
+function clamp01(x: number): number {
+  return Math.max(0, Math.min(1, x));
+}
