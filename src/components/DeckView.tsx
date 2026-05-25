@@ -13,6 +13,9 @@ export function DeckView({ side, isActive, track, deckRef }: Props): JSX.Element
   const pos = deckRef?.positionSec() ?? 0;
   const dur = deckRef?.duration ?? track?.durationSec ?? 0;
   const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
+  const ratio = deckRef?.getStretchRatio() ?? 1;
+  const stretched = Math.abs(ratio - 1) > 0.001;
+  const effectiveBpm = (track?.analysis?.beatGrid.bpm ?? 0) * ratio;
 
   return (
     <div className={`deck deck--${side.toLowerCase()} ${isActive ? 'deck--active' : ''}`}>
@@ -26,7 +29,14 @@ export function DeckView({ side, isActive, track, deckRef }: Props): JSX.Element
           <div className="deck-title">{track.title}</div>
           <div className="deck-artist">{track.artist}</div>
           <div className="deck-meta">
-            <span>{track.analysis?.beatGrid.bpm.toFixed(1) ?? '—'} BPM</span>
+            <span>
+              {track.analysis?.beatGrid.bpm.toFixed(1) ?? '—'} BPM
+              {stretched && (
+                <span className="deck-stretch" title={`Stretched to ${effectiveBpm.toFixed(1)} BPM (${((ratio - 1) * 100).toFixed(1)}%)`}>
+                  {' '}→ {effectiveBpm.toFixed(1)}
+                </span>
+              )}
+            </span>
             <span>{track.analysis?.key.camelot ?? '—'}</span>
             <span>
               {track.analysis ? (track.analysis.energy.mean * 100).toFixed(0) + '%' : '—'}

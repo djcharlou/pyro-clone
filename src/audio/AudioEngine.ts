@@ -86,47 +86,104 @@ export class AudioEngine {
   }
 
   /**
-   * Equal-power crossfade from active deck to the inactive deck.
-   * Schedules ramps on AudioParams + a small JS timer to swap which deck
-   * is "active" at the end of the transition.
+   * Beat-matched equal-power crossfade.
+   *
+   * - Computes BPM ratio (with octave correction) so that deck B plays at
+   *   deck A's tempo during the overlap, using playbackRate (pitch changes
+   *   slightly with tempo — proper time-stretch is full Phase 4 work).
+   * - Clamps the stretch to ±6%; beyond that, B plays at its native tempo
+   *   (transition will sound less aligned but won't be pitched into munchkins).
+   * - Snaps the fade start to the next downbeat of A within a 4-beat lookahead,
+   *   so phase alignment between the two beatgrids is correct from the start.
+   * - Falls back to a plain ctxTime start if A has no beatgrid.
+   *
+   * Returns the AudioContext time at which the fade was scheduled to start
+   * (or null if it couldn't be scheduled).
    */
-  crossfade(durationSec: number, offsetForNewDeck = 0): void {
+  crossfade(opts: {
+    durationBeats?: number;       // default 32
+    minDurationSec?: number;      // default 6
+    maxDurationSec?: number;      // default 20
+    deckBStartOffset?: number;    // default 0 (or B.cues.mixInPoint upstream)
+    leadTimeSec?: number;         // default 0.05
+  } = {}): number | null {
     void this.ensureRunning();
     const active = this.getActive();
     const next = this.getInactive();
     if (!next.track) {
       console.warn('[AudioEngine] crossfade requested but inactive deck has no track');
-      return;
+      return null;
     }
 
-    const t0 = this.ctx.currentTime + 0.02;
-    const t1 = t0 + durationSec;
+    const durationBeats = opts.durationBeats ?? 32;
+    const minDurationSec = opts.minDurationSec ?? 6;
+    const maxDurationSec = opts.maxDurationSec ?? 20;
+    const offsetForB = opts.deckBStartOffset ?? 0;
+    const leadTimeSec = opts.leadTimeSec ?? 0.05;
 
-    // Start next deck if not running
+    // Compute target stretch ratio for B so B's tempo == A's tempo
+    const bpmA = active.bpm;
+    const bpmB = next.bpm;
+    let ratio = bpmA / bpmB;
+    // Octave correction (treat 70 ↔ 140 as the same family)
+    while (ratio > 1.4) ratio /= 2;
+    while (ratio < 0.7) ratio *= 2;
+
+    const SAFE_RANGE = 0.06;
+    const withinSafe = Math.abs(ratio - 1) <= SAFE_RANGE;
+    const appliedRatio = withinSafe ? ratio : 1;
+    next.setStretchRatio(appliedRatio);
+
+    // Fade duration in seconds, derived from beats at A's BPM, then clamped
+    let fadeDur = (durationBeats * 60) / bpmA;
+    fadeDur = Math.min(maxDurationSec, Math.max(minDurationSec, fadeDur));
+
+    // Decide start time — prefer snapping to next downbeat of A within lookahead
+    const aPos = active.positionSec();
+    let startInTrackA = aPos + leadTimeSec;
+    const downbeats = active.track?.analysis?.beatGrid.downbeats;
+    if (downbeats && downbeats.length) {
+      const beatDurA = 60 / bpmA;
+      const lookahead = 4 * beatDurA;
+      const snap = downbeats.find((db) => db >= aPos + leadTimeSec);
+      if (snap !== undefined && snap - aPos <= lookahead + leadTimeSec) {
+        startInTrackA = snap;
+      }
+    }
+
+    // Convert to ctx time
+    const t0 = this.ctx.currentTime + (startInTrackA - aPos);
+    const t1 = t0 + fadeDur;
+
+    // Start deck B at correct offset (its mix-in point, which is a downbeat)
     if (!next.isPlaying) {
-      next.scheduleStart(t0, offsetForNewDeck);
+      next.scheduleStart(t0, offsetForB);
     }
 
-    // Equal-power curve sampled into setValueAtTime calls
+    // Equal-power crossfade ramp
     const SAMPLES = 64;
     active.gain.gain.cancelScheduledValues(t0);
     next.gain.gain.cancelScheduledValues(t0);
     active.gain.gain.setValueAtTime(active.gain.gain.value, t0);
-    next.gain.gain.setValueAtTime(next.gain.gain.value, t0);
+    next.gain.gain.setValueAtTime(0, t0 - 0.001 > 0 ? t0 - 0.001 : 0);
 
     for (let i = 0; i <= SAMPLES; i++) {
       const x = i / SAMPLES;
-      const t = t0 + x * durationSec;
-      const fadeOut = Math.cos((x * Math.PI) / 2);
-      const fadeIn = Math.sin((x * Math.PI) / 2);
-      active.gain.gain.setValueAtTime(fadeOut, t);
-      next.gain.gain.setValueAtTime(fadeIn, t);
+      const t = t0 + x * fadeDur;
+      active.gain.gain.setValueAtTime(Math.cos((x * Math.PI) / 2), t);
+      next.gain.gain.setValueAtTime(Math.sin((x * Math.PI) / 2), t);
     }
     active.gain.gain.setValueAtTime(0, t1 + 0.001);
     next.gain.gain.setValueAtTime(1, t1 + 0.001);
 
-    // Stop the outgoing deck shortly after the fade
     active.scheduleStop(t1 + 0.1);
+
+    console.info(
+      `[crossfade] A=${bpmA.toFixed(1)}BPM B=${bpmB.toFixed(1)}BPM ` +
+        `ratio=${ratio.toFixed(3)}${withinSafe ? '' : ' (out-of-range, no stretch)'} ` +
+        `beats=${durationBeats} dur=${fadeDur.toFixed(2)}s ` +
+        `snap=${(startInTrackA - aPos).toFixed(2)}s ahead`
+    );
 
     this.listeners.onTransitionStart?.();
     const swapInMs = Math.max(0, (t1 - this.ctx.currentTime) * 1000);
@@ -137,6 +194,8 @@ export class AudioEngine {
       this.listeners.onTransitionEnd?.();
       this.listeners.onDeckUpdate?.();
     }, swapInMs);
+
+    return t0;
   }
 
   /**

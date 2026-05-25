@@ -112,12 +112,15 @@ export function App(): JSX.Element {
     if (!engine) return;
     const active = engine.getActive();
     if (!active.track || !active.isPlaying) return;
+    const bpmA = active.bpm;
+    const fadeBeats = 32;
+    const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
+
     const pos = active.positionSec();
     const dur = active.duration;
     const mixOut = active.track.analysis?.cues.mixOutPoint ?? Math.max(0, dur - 16);
-    const fadeDur = 12;
-    const timeToFadeStart = mixOut - fadeDur - pos;
-    if (timeToFadeStart > 0.7) return;
+    const triggerAt = mixOut - fadeDur - 0.7;
+    if (pos < triggerAt) return;
 
     const inactive = engine.getInactive();
     if (!inactive.track) {
@@ -126,7 +129,7 @@ export function App(): JSX.Element {
     }
     if (inactive.isPlaying) return;
     const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
-    engine.crossfade(fadeDur, offset);
+    engine.crossfade({ durationBeats: fadeBeats, deckBStartOffset: offset });
   }
 
   async function loadNextIntoInactive(): Promise<void> {
@@ -277,7 +280,7 @@ export function App(): JSX.Element {
     const inactive = engine.getInactive();
     if (!inactive.track) return;
     const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
-    engine.crossfade(8, offset);
+    engine.crossfade({ durationBeats: 16, deckBStartOffset: offset });
   }
 
   return (

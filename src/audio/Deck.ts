@@ -24,6 +24,7 @@ export class Deck {
   private bufferStartOffset = 0;
   private playing = false;
   private listeners: DeckListeners;
+  private stretchRatio = 1;
   track: AnalyzedTrack | null = null;
 
   constructor(ctx: AudioContext, id: DeckId, listeners: DeckListeners = {}) {
@@ -75,7 +76,24 @@ export class Deck {
     const decoded = await this.ctx.decodeAudioData(audioData);
     this.buffer = decoded;
     this.track = track;
+    this.stretchRatio = 1;
     this.listeners.onLoad?.(track);
+  }
+
+  /**
+   * Set the playback rate ratio (1.0 = native, 1.05 = 5% faster).
+   * Pitch changes with tempo (no proper time-stretch yet — that's Phase 4 full).
+   * Stored across source recreations so it applies to scheduleStart() too.
+   */
+  setStretchRatio(ratio: number): void {
+    this.stretchRatio = ratio;
+    if (this.source) {
+      this.source.playbackRate.value = ratio;
+    }
+  }
+
+  getStretchRatio(): number {
+    return this.stretchRatio;
   }
 
   get isPlaying(): boolean {
@@ -92,7 +110,10 @@ export class Deck {
 
   positionSec(): number {
     if (!this.playing) return this.bufferStartOffset;
-    return this.bufferStartOffset + (this.ctx.currentTime - this.startedAtCtx);
+    return (
+      this.bufferStartOffset +
+      (this.ctx.currentTime - this.startedAtCtx) * this.stretchRatio
+    );
   }
 
   play(offsetSec = 0): void {
@@ -100,6 +121,7 @@ export class Deck {
     this.stop();
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
+    src.playbackRate.value = this.stretchRatio;
     src.connect(this.lowEQ);
     src.onended = () => {
       if (this.source === src) {
@@ -120,6 +142,7 @@ export class Deck {
     this.stop();
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
+    src.playbackRate.value = this.stretchRatio;
     src.connect(this.lowEQ);
     src.onended = () => {
       if (this.source === src) {

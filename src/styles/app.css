@@ -130,6 +130,7 @@ input[type="text"], input.library-filter {
   font-size: 11px;
   margin-bottom: 8px;
 }
+.deck-stretch { color: var(--accent); font-weight: 600; }
 .deck-progress {
   height: 6px;
   background: var(--bg);
