@@ -1,5 +1,6 @@
 import type { AnalyzedTrack, TrackAnalysis, Track } from '@shared/types';
 import type { AnalyzeRequest, AnalyzeResponse } from './worker';
+import { fileRegistry } from '@/library/Importer';
 
 interface PendingJob {
   resolve(a: TrackAnalysis): void;
@@ -8,8 +9,8 @@ interface PendingJob {
 
 /**
  * Single Web Worker that processes one track at a time.
- * Files are decoded in the renderer's main thread (AudioContext), then the
- * raw Float32Array channels are transferred to the worker.
+ * Audio is decoded in the main thread (AudioContext) then the raw
+ * Float32Array channels are transferred to the worker.
  */
 export class AnalysisQueue {
   private worker: Worker;
@@ -18,7 +19,11 @@ export class AnalysisQueue {
   private decodeCtx: OfflineAudioContext;
   private queue: Array<() => Promise<void>> = [];
   private busy = false;
-  onProgress?: (state: { trackId: string; phase: 'decoding' | 'analyzing' | 'done' | 'error'; error?: string }) => void;
+  onProgress?: (state: {
+    trackId: string;
+    phase: 'decoding' | 'analyzing' | 'done' | 'error';
+    error?: string;
+  }) => void;
 
   constructor() {
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), {
@@ -32,7 +37,6 @@ export class AnalysisQueue {
       if (msg.ok) job.resolve(msg.result);
       else job.reject(new Error(msg.error));
     };
-    // 1-sample offline context just for spec compliance; we re-create real one per file
     this.decodeCtx = new OfflineAudioContext(1, 1, 44100);
   }
 
@@ -41,7 +45,7 @@ export class AnalysisQueue {
       this.queue.push(async () => {
         try {
           this.onProgress?.({ trackId: track.id, phase: 'decoding' });
-          const audioBuffer = await this.decodeTrack(track.filePath);
+          const audioBuffer = await this.decodeTrack(track.id);
           this.onProgress?.({ trackId: track.id, phase: 'analyzing' });
           const channels: Float32Array[] = [];
           for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
@@ -85,19 +89,26 @@ export class AnalysisQueue {
     }
   }
 
-  private async decodeTrack(filePath: string): Promise<AudioBuffer> {
-    const buf = await window.pyro.readAudioFile(filePath);
+  private async decodeTrack(trackId: string): Promise<AudioBuffer> {
+    const file = await fileRegistry.getFile(trackId);
+    if (!file) throw new Error(`No file handle available for track ${trackId}`);
+    const buf = await file.arrayBuffer();
     return await this.decodeCtx.decodeAudioData(buf);
   }
 
-  private analyzeInWorker(
-    input: { trackId: string; channels: Float32Array[]; sampleRate: number; durationSec: number }
-  ): Promise<TrackAnalysis> {
+  private analyzeInWorker(input: {
+    trackId: string;
+    channels: Float32Array[];
+    sampleRate: number;
+    durationSec: number;
+  }): Promise<TrackAnalysis> {
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       const req: AnalyzeRequest = { id, input };
-      const transferList: Transferable[] = input.channels.map((c) => c.buffer as ArrayBuffer);
+      const transferList: Transferable[] = input.channels.map(
+        (c) => c.buffer as ArrayBuffer
+      );
       this.worker.postMessage(req, transferList);
     });
   }

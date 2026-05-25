@@ -1,34 +1,26 @@
 {
   "name": "pyro-clone",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local-file automix DJ engine (Serato Pyro-like)",
-  "main": "out/main/index.js",
+  "type": "module",
+  "description": "Local-file automix DJ engine — pure web app, runs in any modern browser",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "postinstall": "electron-builder install-app-deps"
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "better-sqlite3": "^12.10.0",
-    "music-metadata": "^7.14.0",
+    "idb": "^8.0.0",
+    "music-metadata-browser": "^2.5.10",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.1",
-    "@electron-toolkit/utils": "^3.0.0",
-    "@types/better-sqlite3": "^7.6.11",
-    "@types/node": "^22.10.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^2.3.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
   }

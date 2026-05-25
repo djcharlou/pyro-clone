@@ -9,6 +9,15 @@ import { DeckView } from './components/DeckView';
 import { Transport } from './components/Transport';
 import { QueuePanel } from './components/QueuePanel';
 import { StatusBar } from './components/StatusBar';
+import { ImportControls } from './components/ImportControls';
+import { store } from './db/IndexedDBStore';
+import {
+  importFiles,
+  importViaDirectoryPicker,
+  fileRegistry,
+  supportsDirectoryPicker,
+  type ImportProgress,
+} from './library/Importer';
 
 export function App(): JSX.Element {
   const [, forceUpdate] = useState(0);
@@ -30,7 +39,6 @@ export function App(): JSX.Element {
   const engineRef = useRef<AudioEngine | null>(null);
   const queueRef = useRef<AnalysisQueue | null>(null);
 
-  // Initialize engine + queue once
   useEffect(() => {
     const engine = new AudioEngine({
       onDeckUpdate: () => forceUpdate((x) => x + 1),
@@ -45,16 +53,16 @@ export function App(): JSX.Element {
 
     const aq = new AnalysisQueue();
     aq.onProgress = (state) => {
-      if (state.phase === 'analyzing' || state.phase === 'decoding') {
-        markAnalyzing(state.trackId, true);
-      } else {
-        markAnalyzing(state.trackId, false);
-      }
+      const active = state.phase === 'analyzing' || state.phase === 'decoding';
+      markAnalyzing(state.trackId, active);
     };
     queueRef.current = aq;
 
-    // Load library
-    void window.pyro.listTracks().then(setTracks);
+    void (async () => {
+      await store.open();
+      const initial = await store.listTracks();
+      setTracks(initial);
+    })();
 
     return () => {
       aq.destroy();
@@ -63,7 +71,7 @@ export function App(): JSX.Element {
 
   // Tick deck positions
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       const engine = engineRef.current;
       if (!engine) return;
       const a = engine.deckA;
@@ -80,18 +88,17 @@ export function App(): JSX.Element {
       });
       forceUpdate((x) => x + 1);
     }, 250);
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, []);
 
-  // Auto-mix scheduling
   useEffect(() => {
     if (!autoMix) return;
     const engine = engineRef.current;
     if (!engine) return;
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       void maybeStartAutoTransition();
     }, 500);
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [autoMix, tracks, session]);
 
   const analyzedTrackById = useMemo(() => {
@@ -114,11 +121,9 @@ export function App(): JSX.Element {
 
     const inactive = engine.getInactive();
     if (!inactive.track) {
-      // Pick + load next track
       await loadNextIntoInactive();
       return;
     }
-    // Begin fade if not already in progress
     if (inactive.isPlaying) return;
     const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
     engine.crossfade(fadeDur, offset);
@@ -129,7 +134,7 @@ export function App(): JSX.Element {
     if (!engine) return;
     const active = engine.getActive();
     if (!active.track) return;
-    const analyzedPool = tracks.filter((t) => t.analysis);
+    const analyzedPool = tracks.filter((t) => t.analysis && fileRegistry.has(t.id));
     if (analyzedPool.length < 2) return;
     const report = pickNext({
       pool: analyzedPool,
@@ -140,10 +145,20 @@ export function App(): JSX.Element {
     await loadTrackIntoInactive(report.picked.track);
   }
 
+  async function loadAudioBuffer(track: AnalyzedTrack): Promise<ArrayBuffer | null> {
+    const file = await fileRegistry.getFile(track.id);
+    if (!file) {
+      console.warn('[load] no file for track', track.title);
+      return null;
+    }
+    return await file.arrayBuffer();
+  }
+
   async function loadTrackIntoInactive(track: AnalyzedTrack): Promise<void> {
     const engine = engineRef.current;
     if (!engine) return;
-    const buffer = await window.pyro.readAudioFile(track.filePath);
+    const buffer = await loadAudioBuffer(track);
+    if (!buffer) return;
     await engine.loadIntoInactive(track, buffer);
     forceUpdate((x) => x + 1);
   }
@@ -151,7 +166,8 @@ export function App(): JSX.Element {
   async function loadTrackIntoActive(track: AnalyzedTrack): Promise<void> {
     const engine = engineRef.current;
     if (!engine) return;
-    const buffer = await window.pyro.readAudioFile(track.filePath);
+    const buffer = await loadAudioBuffer(track);
+    if (!buffer) return;
     await engine.loadIntoActive(track, buffer);
     if (engine.getActive().track && !engine.getActive().isPlaying) {
       pushHistory(track.id);
@@ -159,39 +175,62 @@ export function App(): JSX.Element {
     forceUpdate((x) => x + 1);
   }
 
-  async function handleImport(): Promise<void> {
+  function handleProgress(ev: ImportProgress): void {
+    if (ev.kind === 'track-added' && ev.track) {
+      setImportState({ lastTrackTitle: ev.track.title });
+    }
+  }
+
+  async function handleImportDirectory(): Promise<void> {
     setImportState({ running: true, added: 0, failed: 0, lastTrackTitle: '' });
-    const cleanup = window.pyro.onImportProgress((ev: unknown) => {
-      const e = ev as { kind: string; track?: { title: string } };
-      if (e.kind === 'track-added' && e.track) {
-        setImportState({ lastTrackTitle: e.track.title });
-      }
-    });
     try {
-      const result = await window.pyro.importDirectory();
+      const summary = await importViaDirectoryPicker(handleProgress);
       setImportState({
         running: false,
-        added: result.added,
-        failed: result.failed,
+        added: summary.added,
+        failed: summary.failed,
         lastTrackTitle: '',
       });
-      const refreshed = await window.pyro.listTracks();
+      const refreshed = await store.listTracks();
       setTracks(refreshed);
-      // Auto-analyze any newly added tracks
       void analyzeUnanalyzed(refreshed);
-    } finally {
-      cleanup();
+    } catch (err) {
+      if ((err as DOMException).name === 'AbortError') {
+        setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
+        return;
+      }
+      console.error('[import]', err);
+      setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
+    }
+  }
+
+  async function handleImportFiles(files: FileList | File[]): Promise<void> {
+    setImportState({ running: true, added: 0, failed: 0, lastTrackTitle: '' });
+    try {
+      const summary = await importFiles(files, handleProgress);
+      setImportState({
+        running: false,
+        added: summary.added,
+        failed: summary.failed,
+        lastTrackTitle: '',
+      });
+      const refreshed = await store.listTracks();
+      setTracks(refreshed);
+      void analyzeUnanalyzed(refreshed);
+    } catch (err) {
+      console.error('[import]', err);
+      setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
     }
   }
 
   async function analyzeUnanalyzed(all: AnalyzedTrack[]): Promise<void> {
     const aq = queueRef.current;
     if (!aq) return;
-    const todo = all.filter((t) => !t.analysis);
+    const todo = all.filter((t) => !t.analysis && fileRegistry.has(t.id));
     for (const t of todo) {
       try {
         const analysis = await aq.enqueue(t);
-        await window.pyro.saveAnalysis(analysis);
+        await store.saveAnalysis(analysis);
         upsertAnalysis(t.id, { analysis });
       } catch (err) {
         console.error('[analyze] failed', t.title, err);
@@ -202,12 +241,16 @@ export function App(): JSX.Element {
   async function handleReanalyze(track: AnalyzedTrack): Promise<void> {
     const aq = queueRef.current;
     if (!aq) return;
+    if (!fileRegistry.has(track.id)) {
+      console.warn('[reanalyze] file unavailable for', track.title, '— re-import folder');
+      return;
+    }
     try {
       const analysis = await aq.enqueue(track);
-      await window.pyro.saveAnalysis(analysis);
+      await store.saveAnalysis(analysis);
       upsertAnalysis(track.id, { analysis });
     } catch (err) {
-      console.error('[reanalyze] failed', track.title, err);
+      console.error('[reanalyze]', track.title, err);
     }
   }
 
@@ -242,7 +285,11 @@ export function App(): JSX.Element {
       <header className="app-header">
         <h1>pyro-clone</h1>
         <div className="header-actions">
-          <button onClick={handleImport}>+ Import folder</button>
+          <ImportControls
+            supportsDirectory={supportsDirectoryPicker()}
+            onPickDirectory={handleImportDirectory}
+            onPickFiles={handleImportFiles}
+          />
           <label className="auto-mix-toggle">
             <input
               type="checkbox"

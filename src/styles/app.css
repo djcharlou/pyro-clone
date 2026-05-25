@@ -72,7 +72,8 @@ input[type="text"], input.library-filter {
   color: var(--accent);
   letter-spacing: 0.5px;
 }
-.header-actions { display: flex; gap: 8px; align-items: center; }
+.header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.import-controls { display: flex; gap: 6px; }
 .auto-mix-toggle {
   display: flex;
   align-items: center;
