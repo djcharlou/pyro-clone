@@ -1,0 +1,19 @@
+{
+  "name": "pyro-clone — automix DJ",
+  "short_name": "pyro",
+  "description": "Local-file auto-mix DJ that picks the next song, matches BPMs and crossfades.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#b91d12",
+  "theme_color": "#b91d12",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

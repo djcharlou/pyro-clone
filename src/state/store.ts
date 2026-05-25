@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   AnalyzedTrack,
+  Playlist,
   SessionState,
   SelectionResult,
 } from '@shared/types';
@@ -48,6 +49,24 @@ interface AppState {
 
   analyzingIds: Set<string>;
   markAnalyzing(id: string, on: boolean): void;
+
+  // Queue: ordered list of track IDs to play next (after current)
+  queue: string[];
+  setQueue(ids: string[]): void;
+  addToQueue(id: string): void;
+  addManyToQueue(ids: string[]): void;
+  removeFromQueue(id: string): void;
+  moveInQueue(fromIdx: number, toIdx: number): void;
+  popQueue(): string | null;
+  clearQueue(): void;
+
+  // Stored playlists
+  playlists: Playlist[];
+  setPlaylists(p: Playlist[]): void;
+
+  // UI: bottom sheet open state
+  sheet: 'add' | 'playlists' | 'library' | null;
+  openSheet(s: AppState['sheet']): void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -89,7 +108,7 @@ export const useStore = create<AppState>((set) => ({
   lastPick: null,
   setLastPick: (pick) => set({ lastPick: pick }),
 
-  autoMix: false,
+  autoMix: true,
   setAutoMix: (on) => set({ autoMix: on }),
 
   importState: { running: false, added: 0, failed: 0, lastTrackTitle: '' },
@@ -104,4 +123,34 @@ export const useStore = create<AppState>((set) => ({
       else next.delete(id);
       return { analyzingIds: next };
     }),
+
+  queue: [],
+  setQueue: (ids) => set({ queue: ids }),
+  addToQueue: (id) => set((s) => ({ queue: [...s.queue, id] })),
+  addManyToQueue: (ids) => set((s) => ({ queue: [...s.queue, ...ids] })),
+  removeFromQueue: (id) =>
+    set((s) => ({ queue: s.queue.filter((q) => q !== id) })),
+  moveInQueue: (fromIdx, toIdx) =>
+    set((s) => {
+      const arr = [...s.queue];
+      const [item] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, item);
+      return { queue: arr };
+    }),
+  popQueue: () => {
+    let popped: string | null = null;
+    set((s) => {
+      if (s.queue.length === 0) return s;
+      popped = s.queue[0];
+      return { queue: s.queue.slice(1) };
+    });
+    return popped;
+  },
+  clearQueue: () => set({ queue: [] }),
+
+  playlists: [],
+  setPlaylists: (p) => set({ playlists: p }),
+
+  sheet: null,
+  openSheet: (s) => set({ sheet: s }),
 }));

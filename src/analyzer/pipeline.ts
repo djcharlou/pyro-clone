@@ -4,6 +4,7 @@ import type {
   BeatGrid,
   EnergyProfile,
   CuePoints,
+  WaveformPeaks,
 } from '@shared/types';
 import { ANALYZER_VERSION } from '@shared/types';
 import {
@@ -64,6 +65,9 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   // Cues derived from energy curve
   const cues = computeCues(energy, beats, downbeats, input.durationSec);
 
+  // Waveform peaks (~512 bins of max abs sample per window)
+  const waveform = computeWaveformPeaks(downsampled, 512);
+
   const quality = scoreQuality(bpmConfidence, isStable, key.confidence);
 
   return {
@@ -75,7 +79,30 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     key,
     energy,
     cues,
+    waveform,
   };
+}
+
+function computeWaveformPeaks(samples: Float32Array, bins: number): WaveformPeaks {
+  const values = new Array<number>(bins);
+  const windowSize = Math.max(1, Math.floor(samples.length / bins));
+  let maxObserved = 0;
+  for (let i = 0; i < bins; i++) {
+    const start = i * windowSize;
+    const end = Math.min(samples.length, start + windowSize);
+    let peak = 0;
+    for (let j = start; j < end; j++) {
+      const v = Math.abs(samples[j]);
+      if (v > peak) peak = v;
+    }
+    values[i] = peak;
+    if (peak > maxObserved) maxObserved = peak;
+  }
+  // Normalize to 0..1 for stable rendering
+  if (maxObserved > 0) {
+    for (let i = 0; i < bins; i++) values[i] = values[i] / maxObserved;
+  }
+  return { values };
 }
 
 /**

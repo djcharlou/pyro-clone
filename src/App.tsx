@@ -3,13 +3,17 @@ import { useStore } from './state/store';
 import { AudioEngine } from './audio/AudioEngine';
 import { AnalysisQueue } from './analyzer/AnalysisQueue';
 import { pickNext } from './selector/Selector';
-import type { AnalyzedTrack, SelectionResult } from '@shared/types';
-import { Library } from './components/Library';
-import { DeckView } from './components/DeckView';
-import { Transport } from './components/Transport';
-import { QueuePanel } from './components/QueuePanel';
-import { StatusBar } from './components/StatusBar';
-import { ImportControls } from './components/ImportControls';
+import { computeScore } from './selector/scoring';
+import type {
+  AnalyzedTrack,
+  SelectionResult,
+  Playlist,
+} from '@shared/types';
+import { NowPlaying } from './components/NowPlaying';
+import { QueueList } from './components/QueueList';
+import { Suggestions } from './components/Suggestions';
+import { AddSheet } from './components/AddSheet';
+import { PlaylistsSheet } from './components/PlaylistsSheet';
 import { store } from './db/IndexedDBStore';
 import {
   importFiles,
@@ -30,21 +34,32 @@ export function App(): JSX.Element {
   const session = useStore((s) => s.session);
   const pushHistory = useStore((s) => s.pushHistory);
   const setLastPick = useStore((s) => s.setLastPick);
-  const lastPick = useStore((s) => s.lastPick);
   const autoMix = useStore((s) => s.autoMix);
   const setAutoMix = useStore((s) => s.setAutoMix);
   const markAnalyzing = useStore((s) => s.markAnalyzing);
   const setImportState = useStore((s) => s.setImportState);
+  const importState = useStore((s) => s.importState);
+  const queue = useStore((s) => s.queue);
+  const setQueue = useStore((s) => s.setQueue);
+  const addToQueue = useStore((s) => s.addToQueue);
+  const addManyToQueue = useStore((s) => s.addManyToQueue);
+  const removeFromQueue = useStore((s) => s.removeFromQueue);
+  const moveInQueue = useStore((s) => s.moveInQueue);
+  const popQueue = useStore((s) => s.popQueue);
+  const playlists = useStore((s) => s.playlists);
+  const setPlaylists = useStore((s) => s.setPlaylists);
+  const sheet = useStore((s) => s.sheet);
+  const openSheet = useStore((s) => s.openSheet);
 
   const engineRef = useRef<AudioEngine | null>(null);
   const queueRef = useRef<AnalysisQueue | null>(null);
+  const loadingNextRef = useRef(false);
 
   useEffect(() => {
     const engine = new AudioEngine({
       onDeckUpdate: () => forceUpdate((x) => x + 1),
       onTransitionEnd: () => {
-        const newActive = engine.getActiveId();
-        setActiveDeck(newActive);
+        setActiveDeck(engine.getActiveId());
         const active = engine.getActive();
         if (active.track) pushHistory(active.track.id);
       },
@@ -52,16 +67,20 @@ export function App(): JSX.Element {
     engineRef.current = engine;
 
     const aq = new AnalysisQueue();
-    aq.onProgress = (state) => {
-      const active = state.phase === 'analyzing' || state.phase === 'decoding';
-      markAnalyzing(state.trackId, active);
+    aq.onProgress = (st) => {
+      const on = st.phase === 'analyzing' || st.phase === 'decoding';
+      markAnalyzing(st.trackId, on);
     };
     queueRef.current = aq;
 
     void (async () => {
       await store.open();
-      const initial = await store.listTracks();
-      setTracks(initial);
+      const [initialTracks, initialPlaylists] = await Promise.all([
+        store.listTracks(),
+        store.listPlaylists(),
+      ]);
+      setTracks(initialTracks);
+      setPlaylists(initialPlaylists);
     })();
 
     return () => {
@@ -69,7 +88,6 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  // Tick deck positions
   useEffect(() => {
     const interval = window.setInterval(() => {
       const engine = engineRef.current;
@@ -93,65 +111,69 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!autoMix) return;
-    const engine = engineRef.current;
-    if (!engine) return;
-    const interval = window.setInterval(() => {
-      void maybeStartAutoTransition();
-    }, 500);
-    return () => window.clearInterval(interval);
-  }, [autoMix, tracks, session]);
+    const id = window.setInterval(() => void maybeStartAutoTransition(), 500);
+    return () => window.clearInterval(id);
+  }, [autoMix, tracks, session, queue]);
 
-  const analyzedTrackById = useMemo(() => {
+  const tracksById = useMemo(() => {
     const m = new Map<string, AnalyzedTrack>();
     for (const t of tracks) m.set(t.id, t);
     return m;
   }, [tracks]);
 
-  async function maybeStartAutoTransition(): Promise<void> {
-    const engine = engineRef.current;
-    if (!engine) return;
-    const active = engine.getActive();
-    if (!active.track || !active.isPlaying) return;
-    const bpmA = active.bpm;
-    const fadeBeats = 32;
-    const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
+  const queueTracks = useMemo(
+    () => queue.map((id) => tracksById.get(id)).filter((t): t is AnalyzedTrack => !!t),
+    [queue, tracksById]
+  );
 
-    const pos = active.positionSec();
-    const dur = active.duration;
-    const mixOut = active.track.analysis?.cues.mixOutPoint ?? Math.max(0, dur - 16);
-    const triggerAt = mixOut - fadeDur - 0.7;
-    if (pos < triggerAt) return;
+  const queueIds = useMemo(() => new Set(queue), [queue]);
 
-    const inactive = engine.getInactive();
-    if (!inactive.track) {
-      await loadNextIntoInactive();
-      return;
-    }
-    if (inactive.isPlaying) return;
-    const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
-    engine.crossfade({ durationBeats: fadeBeats, deckBStartOffset: offset });
-  }
+  const currentTrack: AnalyzedTrack | null =
+    (engineRef.current?.getActive().track && tracksById.get(engineRef.current.getActive().track!.id)) ||
+    engineRef.current?.getActive().track ||
+    null;
+  const activeDeckObj = engineRef.current?.getActive();
+  const playing = activeDeckObj?.isPlaying ?? false;
+  const positionSec = activeDeckObj?.positionSec() ?? 0;
+  const durationSec = activeDeckObj?.duration ?? currentTrack?.durationSec ?? 0;
+  const stretchRatio = activeDeckObj?.getStretchRatio() ?? 1;
+  const effectiveBpm =
+    currentTrack?.analysis?.beatGrid.bpm !== undefined
+      ? currentTrack.analysis.beatGrid.bpm * stretchRatio
+      : null;
 
-  async function loadNextIntoInactive(): Promise<void> {
-    const engine = engineRef.current;
-    if (!engine) return;
-    const active = engine.getActive();
-    if (!active.track) return;
-    const analyzedPool = tracks.filter((t) => t.analysis && fileRegistry.has(t.id));
-    if (analyzedPool.length < 2) return;
-    const report = pickNext({
-      pool: analyzedPool,
-      current: active.track,
-      session,
-    });
-    setLastPick(report.picked);
-    await loadTrackIntoInactive(report.picked.track);
-  }
+  // Suggestions: top-ranked matches for the LAST track in queue (or currently
+  // playing if queue empty), excluding tracks already in queue + current.
+  const suggestions: SelectionResult[] = useMemo(() => {
+    const reference = queueTracks.length > 0 ? queueTracks[queueTracks.length - 1] : currentTrack;
+    if (!reference || !reference.analysis) return [];
+    const excludeIds = new Set([reference.id, ...queue]);
+    const pool = tracks.filter((t) => t.analysis && !excludeIds.has(t.id));
+    if (pool.length === 0) return [];
+    return pool
+      .map((cand) => {
+        const { score, parts } = computeScore(cand, {
+          current: reference,
+          historyTracks: queueTracks,
+          weights: session.weights,
+          targetEnergy: session.targetEnergy,
+        });
+        return {
+          track: cand,
+          score,
+          parts,
+          mode: 'normal' as const,
+          reasoning: `score=${score.toFixed(2)} bpm=${parts.bpm.toFixed(2)} key=${parts.key.toFixed(2)}`,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+  }, [tracks, queueTracks, currentTrack, session, queue]);
 
   async function loadAudioBuffer(track: AnalyzedTrack): Promise<ArrayBuffer | null> {
     const file = await fileRegistry.getFile(track.id);
     if (!file) {
-      console.warn('[load] no file for track', track.title);
+      console.warn('[load] no file for', track.title);
       return null;
     }
     return await file.arrayBuffer();
@@ -178,6 +200,69 @@ export function App(): JSX.Element {
     forceUpdate((x) => x + 1);
   }
 
+  async function maybeStartAutoTransition(): Promise<void> {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const active = engine.getActive();
+    if (!active.track || !active.isPlaying) return;
+    const bpmA = active.bpm;
+    const fadeBeats = 32;
+    const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
+
+    const pos = active.positionSec();
+    const dur = active.duration;
+    const mixOut = active.track.analysis?.cues.mixOutPoint ?? Math.max(0, dur - 16);
+    const triggerAt = mixOut - fadeDur - 0.7;
+    if (pos < triggerAt) return;
+
+    const inactive = engine.getInactive();
+    if (!inactive.track) {
+      if (loadingNextRef.current) return;
+      await loadNextIntoInactive();
+      return;
+    }
+    if (inactive.isPlaying) return;
+    const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
+    engine.crossfade({ durationBeats: fadeBeats, deckBStartOffset: offset });
+    // Pop from queue if the loaded inactive matches the head
+    if (queue.length > 0 && queue[0] === inactive.track.id) {
+      popQueue();
+    }
+  }
+
+  async function loadNextIntoInactive(): Promise<void> {
+    const engine = engineRef.current;
+    if (!engine) return;
+    loadingNextRef.current = true;
+    try {
+      // Prefer the head of the queue if any
+      if (queue.length > 0) {
+        const next = tracksById.get(queue[0]);
+        if (next) {
+          await loadTrackIntoInactive(next);
+          return;
+        }
+      }
+      // Else use the selector
+      const active = engine.getActive();
+      if (!active.track) return;
+      const analyzedPool = tracks.filter(
+        (t) => t.analysis && fileRegistry.has(t.id)
+      );
+      if (analyzedPool.length < 2) return;
+      const report = pickNext({
+        pool: analyzedPool,
+        current: active.track,
+        session,
+      });
+      setLastPick(report.picked);
+      addToQueue(report.picked.track.id);
+      await loadTrackIntoInactive(report.picked.track);
+    } finally {
+      loadingNextRef.current = false;
+    }
+  }
+
   function handleProgress(ev: ImportProgress): void {
     if (ev.kind === 'track-added' && ev.track) {
       setImportState({ lastTrackTitle: ev.track.title });
@@ -185,6 +270,7 @@ export function App(): JSX.Element {
   }
 
   async function handleImportDirectory(): Promise<void> {
+    if (!supportsDirectoryPicker()) return;
     setImportState({ running: true, added: 0, failed: 0, lastTrackTitle: '' });
     try {
       const summary = await importViaDirectoryPicker(handleProgress);
@@ -198,11 +284,9 @@ export function App(): JSX.Element {
       setTracks(refreshed);
       void analyzeUnanalyzed(refreshed);
     } catch (err) {
-      if ((err as DOMException).name === 'AbortError') {
-        setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
-        return;
+      if ((err as DOMException).name !== 'AbortError') {
+        console.error('[import]', err);
       }
-      console.error('[import]', err);
       setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
     }
   }
@@ -236,24 +320,8 @@ export function App(): JSX.Element {
         await store.saveAnalysis(analysis);
         upsertAnalysis(t.id, { analysis });
       } catch (err) {
-        console.error('[analyze] failed', t.title, err);
+        console.error('[analyze]', t.title, err);
       }
-    }
-  }
-
-  async function handleReanalyze(track: AnalyzedTrack): Promise<void> {
-    const aq = queueRef.current;
-    if (!aq) return;
-    if (!fileRegistry.has(track.id)) {
-      console.warn('[reanalyze] file unavailable for', track.title, '— re-import folder');
-      return;
-    }
-    try {
-      const analysis = await aq.enqueue(track);
-      await store.saveAnalysis(analysis);
-      upsertAnalysis(track.id, { analysis });
-    } catch (err) {
-      console.error('[reanalyze]', track.title, err);
     }
   }
 
@@ -261,91 +329,186 @@ export function App(): JSX.Element {
     const engine = engineRef.current;
     if (!engine) return;
     const active = engine.getActive();
-    if (!active.track) return;
-    if (active.isPlaying) active.stop();
-    else {
-      engine.playActive(0);
-      pushHistory(active.track.id);
+    if (active.track) {
+      if (active.isPlaying) active.stop();
+      else {
+        engine.playActive(0);
+        pushHistory(active.track.id);
+      }
+    } else if (queueTracks.length > 0) {
+      // Start from the queue
+      void (async () => {
+        const first = queueTracks[0];
+        await loadTrackIntoActive(first);
+        engine.playActive(first.analysis?.cues.mixInPoint ?? 0);
+        popQueue();
+      })();
     }
     forceUpdate((x) => x + 1);
   }
 
-  async function handlePickNow(): Promise<void> {
-    await loadNextIntoInactive();
-  }
-
-  function handleCrossfadeNow(): void {
+  async function handleSkip(): Promise<void> {
     const engine = engineRef.current;
     if (!engine) return;
     const inactive = engine.getInactive();
-    if (!inactive.track) return;
-    const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
-    engine.crossfade({ durationBeats: 16, deckBStartOffset: offset });
+    if (!inactive.track) {
+      // Load next from queue first
+      await loadNextIntoInactive();
+    }
+    if (engine.getInactive().track) {
+      const offset = engine.getInactive().track!.analysis?.cues.mixInPoint ?? 0;
+      engine.crossfade({ durationBeats: 8, minDurationSec: 2, deckBStartOffset: offset });
+      if (queue.length > 0 && queue[0] === engine.getInactive().track!.id) {
+        popQueue();
+      }
+    }
+  }
+
+  function handleSeek(fraction: number): void {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const active = engine.getActive();
+    if (!active.track) return;
+    const target = fraction * active.duration;
+    active.play(target);
+  }
+
+  async function handlePlayNowFromQueue(id: string): Promise<void> {
+    const track = tracksById.get(id);
+    if (!track) return;
+    const engine = engineRef.current;
+    if (!engine) return;
+    await loadTrackIntoActive(track);
+    engine.playActive(track.analysis?.cues.mixInPoint ?? 0);
+    removeFromQueue(id);
+  }
+
+  // Sheet handlers
+  async function handleSavePlaylist(name: string): Promise<void> {
+    if (queue.length === 0) return;
+    const playlist: Playlist = {
+      id: crypto.randomUUID(),
+      name,
+      trackIds: [...queue],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await store.savePlaylist(playlist);
+    const list = await store.listPlaylists();
+    setPlaylists(list);
+  }
+
+  async function handleLoadPlaylist(id: string): Promise<void> {
+    const p = playlists.find((x) => x.id === id);
+    if (!p) return;
+    setQueue(p.trackIds.filter((tid) => tracksById.has(tid)));
+    openSheet(null);
+  }
+
+  async function handleDeletePlaylist(id: string): Promise<void> {
+    await store.deletePlaylist(id);
+    const list = await store.listPlaylists();
+    setPlaylists(list);
   }
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>pyro-clone</h1>
-        <div className="header-actions">
-          <ImportControls
-            supportsDirectory={supportsDirectoryPicker()}
-            onPickDirectory={handleImportDirectory}
-            onPickFiles={handleImportFiles}
-          />
-          <label className="auto-mix-toggle">
-            <input
-              type="checkbox"
-              checked={autoMix}
-              onChange={(e) => setAutoMix(e.target.checked)}
-            />
-            Auto-mix
-          </label>
+        <div className="app-brand">
+          <span className="brand-dot" />
+          pyro
+        </div>
+        <div className="app-header-actions">
+          <button
+            className={`auto-toggle ${autoMix ? 'auto-toggle--on' : ''}`}
+            onClick={() => setAutoMix(!autoMix)}
+            title="Auto-mix"
+          >
+            ⚡ Auto-mix {autoMix ? 'ON' : 'OFF'}
+          </button>
+          <button
+            className="header-btn"
+            onClick={() => openSheet('playlists')}
+            title="Playlists"
+          >
+            ☰
+          </button>
         </div>
       </header>
 
-      <div className="decks">
-        <DeckView
-          side="A"
-          isActive={activeDeck === 'A'}
-          deckRef={engineRef.current?.deckA ?? null}
-          track={
-            engineRef.current?.deckA.track
-              ? analyzedTrackById.get(engineRef.current.deckA.track.id) ?? engineRef.current.deckA.track
-              : null
-          }
-        />
-        <DeckView
-          side="B"
-          isActive={activeDeck === 'B'}
-          deckRef={engineRef.current?.deckB ?? null}
-          track={
-            engineRef.current?.deckB.track
-              ? analyzedTrackById.get(engineRef.current.deckB.track.id) ?? engineRef.current.deckB.track
-              : null
-          }
-        />
-      </div>
-
-      <Transport
+      <NowPlaying
+        track={currentTrack}
+        playing={playing}
+        positionSec={positionSec}
+        durationSec={durationSec}
+        effectiveBpm={effectiveBpm}
+        stretchRatio={stretchRatio}
         onPlayPause={handlePlayPause}
-        onPickNext={handlePickNow}
-        onCrossfade={handleCrossfadeNow}
+        onSkip={() => void handleSkip()}
+        onSeekFraction={handleSeek}
       />
 
-      <div className="main-content">
-        <Library
-          tracks={tracks}
-          onLoadActive={loadTrackIntoActive}
-          onLoadInactive={loadTrackIntoInactive}
-          onReanalyze={handleReanalyze}
+      <main className="main">
+        <QueueList
+          queueTracks={queueTracks}
+          onRemove={removeFromQueue}
+          onMove={moveInQueue}
+          onPlayNow={(id) => void handlePlayNowFromQueue(id)}
         />
-        <QueuePanel lastPick={lastPick} session={session} tracks={tracks} />
-      </div>
 
-      <StatusBar />
+        <Suggestions
+          candidates={suggestions}
+          onAdd={(id) => addToQueue(id)}
+        />
+      </main>
+
+      <button
+        className="fab"
+        onClick={() => openSheet('add')}
+        aria-label="Add tracks"
+      >
+        +
+      </button>
+
+      <footer className="status-bar">
+        <span>
+          {tracks.length} tracks · {tracks.filter((t) => t.analysis).length} analyzed
+          {useStore.getState().analyzingIds.size > 0 &&
+            ` · analyzing ${useStore.getState().analyzingIds.size}`}
+        </span>
+        {importState.running && <span>Importing: {importState.lastTrackTitle || '…'}</span>}
+      </footer>
+
+      <AddSheet
+        open={sheet === 'add'}
+        tracks={tracks}
+        queueIds={queueIds}
+        onClose={() => openSheet(null)}
+        onAdd={(id) => addToQueue(id)}
+        onAddMany={(ids) => addManyToQueue(ids.filter((id) => !queueIds.has(id)))}
+        onImportFolder={() => void handleImportDirectory()}
+        onImportFiles={() => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.multiple = true;
+          input.accept = 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus';
+          input.onchange = () => {
+            if (input.files) void handleImportFiles(input.files);
+          };
+          input.click();
+        }}
+        supportsDirectoryPicker={supportsDirectoryPicker()}
+      />
+
+      <PlaylistsSheet
+        open={sheet === 'playlists'}
+        playlists={playlists}
+        currentQueueLength={queue.length}
+        onClose={() => openSheet(null)}
+        onSaveCurrent={(name) => void handleSavePlaylist(name)}
+        onLoad={(id) => void handleLoadPlaylist(id)}
+        onDelete={(id) => void handleDeletePlaylist(id)}
+      />
     </div>
   );
 }
-
-export type { SelectionResult };

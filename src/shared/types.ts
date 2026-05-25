@@ -41,6 +41,19 @@ export interface CuePoints {
   mixOutPoint: number;
 }
 
+export interface WaveformPeaks {
+  /** One value per bin in [0, 1]. Length is typically 512. */
+  values: number[];
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  trackIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Track {
   id: string;
   filePath: string;
@@ -64,6 +77,7 @@ export interface TrackAnalysis {
   key: KeyInfo;
   energy: EnergyProfile;
   cues: CuePoints;
+  waveform?: WaveformPeaks;
 }
 
 export interface AnalyzedTrack extends Track {

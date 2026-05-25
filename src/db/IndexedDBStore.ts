@@ -3,10 +3,11 @@ import type {
   Track,
   TrackAnalysis,
   AnalyzedTrack,
+  Playlist,
 } from '@shared/types';
 
 const DB_NAME = 'pyro-clone';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 interface FileHandleRecord {
   id: string;
@@ -20,12 +21,17 @@ interface PyroSchema extends DBSchema {
     indexes: { byPath: string; byAddedAt: number };
   };
   analyses: {
-    key: string; // trackId
+    key: string;
     value: TrackAnalysis;
   };
   fileHandles: {
-    key: string; // trackId
+    key: string;
     value: FileHandleRecord;
+  };
+  playlists: {
+    key: string;
+    value: Playlist;
+    indexes: { byUpdatedAt: number };
   };
 }
 
@@ -46,6 +52,10 @@ export class IndexedDBStore {
         }
         if (!db.objectStoreNames.contains('fileHandles')) {
           db.createObjectStore('fileHandles', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('playlists')) {
+          const pls = db.createObjectStore('playlists', { keyPath: 'id' });
+          pls.createIndex('byUpdatedAt', 'updatedAt');
         }
       },
     });
@@ -105,7 +115,22 @@ export class IndexedDBStore {
       db.clear('tracks'),
       db.clear('analyses'),
       db.clear('fileHandles'),
+      db.clear('playlists'),
     ]);
+  }
+
+  async listPlaylists(): Promise<Playlist[]> {
+    const db = this.require();
+    const all = await db.getAllFromIndex('playlists', 'byUpdatedAt');
+    return all.reverse();
+  }
+
+  async savePlaylist(p: Playlist): Promise<void> {
+    await this.require().put('playlists', p);
+  }
+
+  async deletePlaylist(id: string): Promise<void> {
+    await this.require().delete('playlists', id);
   }
 }
 
