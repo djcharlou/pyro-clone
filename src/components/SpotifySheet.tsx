@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SpotifyAuthState } from '@/spotify/oauth';
 import { beginLogin, clearAuth } from '@/spotify/oauth';
+import type { PlayerBridge } from '@/spotify/player';
 
 interface Props {
   open: boolean;
@@ -13,9 +14,27 @@ interface Props {
   enrichmentBusy: boolean;
   tracksTotal: number;
   tracksWithoutSpotify: number;
+  // Playback
+  playbackBridge: PlayerBridge | null;
+  onEnablePlayback(): void;
+  onPlayUri(uri: string): void;
 }
 
 const CLIENT_ID_KEY = 'pyro.spotify.clientId';
+
+/**
+ * Accept either a spotify: URI or an https://open.spotify.com/track/... URL,
+ * normalize to `spotify:track:<id>`. Returns null on anything unrecognized.
+ */
+function normalizeUri(input: string): string | null {
+  if (!input) return null;
+  if (input.startsWith('spotify:track:')) return input;
+  const m = input.match(/open\.spotify\.com\/(?:intl-\w+\/)?track\/([a-zA-Z0-9]+)/);
+  if (m) return `spotify:track:${m[1]}`;
+  const bare = input.match(/^[a-zA-Z0-9]{22}$/);
+  if (bare) return `spotify:track:${input}`;
+  return null;
+}
 
 export function SpotifySheet({
   open,
@@ -28,10 +47,14 @@ export function SpotifySheet({
   enrichmentBusy,
   tracksTotal,
   tracksWithoutSpotify,
+  playbackBridge,
+  onEnablePlayback,
+  onPlayUri,
 }: Props): JSX.Element | null {
   const [clientId, setClientId] = useState(
     () => localStorage.getItem(CLIENT_ID_KEY) ?? ''
   );
+  const [uriInput, setUriInput] = useState('');
 
   if (!open) return null;
 
@@ -105,6 +128,85 @@ export function SpotifySheet({
               </div>
               {enrichmentStatus && (
                 <div className="spotify-status-line">{enrichmentStatus}</div>
+              )}
+
+              <h3 className="spotify-section-head">Web Playback</h3>
+              {auth.user?.productTier !== 'premium' ? (
+                <p className="spotify-blurb">
+                  Web Playback needs Spotify <strong>Premium</strong>. You can still use enrichment above on a free account.
+                </p>
+              ) : !playbackBridge ? (
+                <>
+                  <p className="spotify-blurb">
+                    Register this app as a Spotify Connect device — after that
+                    you can play any Spotify track from here (or send tracks
+                    to pyro-clone from your phone/desktop).
+                    <br />
+                    <em>No real crossfade with local decks — Spotify audio is DRM-encrypted.</em>
+                  </p>
+                  <button className="sheet-import-btn" onClick={onEnablePlayback}>
+                    Enable playback
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="spotify-status-line">
+                    {playbackBridge.error
+                      ? `⚠ ${playbackBridge.error}`
+                      : playbackBridge.ready
+                        ? `✓ Ready — device "pyro-clone" (${playbackBridge.deviceId?.slice(0, 8)}…)`
+                        : 'Connecting…'}
+                  </div>
+                  {playbackBridge.state?.track_window.current_track && (
+                    <div className="spotify-status" style={{ marginTop: 8 }}>
+                      {playbackBridge.state.track_window.current_track.album.images[0] && (
+                        <img
+                          src={playbackBridge.state.track_window.current_track.album.images[0].url}
+                          alt=""
+                          style={{ width: 40, height: 40, borderRadius: 6 }}
+                        />
+                      )}
+                      <div className="spotify-status-text">
+                        <div className="spotify-status-primary">
+                          {playbackBridge.state.track_window.current_track.name}
+                        </div>
+                        <div className="spotify-status-secondary">
+                          {playbackBridge.state.track_window.current_track.artists.map((a) => a.name).join(', ')}
+                          {' · '}
+                          {playbackBridge.state.paused ? 'Paused' : 'Playing'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="sheet-save-row" style={{ marginTop: 12 }}>
+                    <input
+                      type="text"
+                      className="sheet-filter"
+                      placeholder="spotify:track:… or open URL"
+                      value={uriInput}
+                      onChange={(e) => setUriInput(e.target.value)}
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const uri = normalizeUri(uriInput.trim());
+                          if (uri) onPlayUri(uri);
+                        }
+                      }}
+                    />
+                    <button
+                      className="sheet-import-btn"
+                      onClick={() => {
+                        const uri = normalizeUri(uriInput.trim());
+                        if (uri) onPlayUri(uri);
+                      }}
+                      disabled={!uriInput.trim() || !playbackBridge.ready}
+                    >
+                      Play
+                    </button>
+                  </div>
+                </>
               )}
 
               <div className="spotify-danger">

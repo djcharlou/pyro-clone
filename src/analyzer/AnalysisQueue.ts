@@ -53,6 +53,9 @@ export class AnalysisQueue {
           }
           const result = await this.analyzeInWorker({
             trackId: track.id,
+            // Filename first: DJ-edit packs write the real BPM there, and
+            // the title tag is often missing or wrong on those files.
+            nameHint: `${track.filePath ?? ''} ${track.title ?? ''}`,
             channels,
             sampleRate: audioBuffer.sampleRate,
             durationSec: audioBuffer.duration,
@@ -101,6 +104,7 @@ export class AnalysisQueue {
     channels: Float32Array[];
     sampleRate: number;
     durationSec: number;
+    nameHint?: string;
   }): Promise<TrackAnalysis> {
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {

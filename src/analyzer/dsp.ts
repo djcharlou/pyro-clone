@@ -79,36 +79,114 @@ export function onsetEnvelope(envelope: Float32Array): Float32Array {
 export function estimateBpmFromOnsets(
   onsets: Float32Array,
   envFps: number,
-  minBpm = 70,
-  maxBpm = 180
+  minBpm = 60,
+  maxBpm = 200
 ): { bpm: number; confidence: number } {
-  const minLag = Math.floor((60 / maxBpm) * envFps);
+  const minLag = Math.max(2, Math.floor((60 / maxBpm) * envFps));
   const maxLag = Math.ceil((60 / minBpm) * envFps);
+  if (maxLag >= onsets.length) {
+    return { bpm: 120, confidence: 0 };
+  }
+
+  // --- Normalised autocorrelation ----------------------------------------
+  // Dividing by the overlap length stops long lags from being penalised
+  // simply for having fewer terms in the sum.
   const acf = new Float32Array(maxLag + 1);
   for (let lag = minLag; lag <= maxLag; lag++) {
     let sum = 0;
-    for (let i = 0; i + lag < onsets.length; i++) {
-      sum += onsets[i] * onsets[i + lag];
-    }
-    acf[lag] = sum;
+    const n = onsets.length - lag;
+    for (let i = 0; i < n; i++) sum += onsets[i] * onsets[i + lag];
+    acf[lag] = n > 0 ? sum / n : 0;
   }
-  // Find peak
+
+  // --- Harmonic scoring ---------------------------------------------------
+  // A true beat period P also shows energy at 2P, 3P and 4P. Scoring each
+  // candidate by its own peak PLUS its multiples makes the fundamental beat
+  // the winner instead of a random subdivision, which is what produced the
+  // "81 BPM track detected as 157" class of error.
+  const HARMONIC_WEIGHTS = [1, 0.5, 0.33, 0.25];
+  const score = new Float32Array(maxLag + 1);
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let s = 0;
+    for (let h = 0; h < HARMONIC_WEIGHTS.length; h++) {
+      const l = Math.round(lag * (h + 1));
+      if (l > maxLag) break;
+      s += HARMONIC_WEIGHTS[h] * acf[l];
+    }
+
+    // Sub-harmonic penalty. A candidate at twice the true period (half
+    // tempo) sees every real beat as one of its own harmonics, so pure
+    // harmonic summation ties with the fundamental. The tell is that the
+    // HALF of a half-tempo candidate still lands on strong beats, whereas
+    // the half of the true period lands between them. Divide the score by
+    // how much energy sits at lag/2 to break that tie toward the faster,
+    // correct pulse.
+    const halfLag = Math.round(lag / 2);
+    if (halfLag >= minLag) {
+      const selfPeak = Math.max(1e-9, acf[lag]);
+      const halfRatio = acf[halfLag] / selfPeak;
+      // halfRatio ≈ 1 → we are on a sub-harmonic; ≈ 0 → true fundamental.
+      s /= 1 + 1.6 * Math.max(0, halfRatio);
+    }
+
+    // Gentle log-normal prior centred on 125 BPM. Dance/DJ material clusters
+    // there, and this only breaks ties — it cannot move a strong peak by an
+    // octave on its own.
+    const bpmHere = (60 * envFps) / lag;
+    const prior = Math.exp(-Math.pow(Math.log(bpmHere / 125), 2) / (2 * 0.35 * 0.35));
+    score[lag] = s * (0.75 + 0.25 * prior);
+  }
+
   let peakLag = minLag;
   let peakVal = -Infinity;
   for (let lag = minLag; lag <= maxLag; lag++) {
-    if (acf[lag] > peakVal) {
-      peakVal = acf[lag];
+    if (score[lag] > peakVal) {
+      peakVal = score[lag];
       peakLag = lag;
     }
   }
-  // Confidence: peak prominence vs mean of ACF
-  let meanAcf = 0;
-  for (let lag = minLag; lag <= maxLag; lag++) meanAcf += acf[lag];
-  meanAcf /= (maxLag - minLag + 1);
-  const confidence = clamp01((peakVal / Math.max(1e-9, meanAcf) - 1) / 3);
 
-  const bpm = (60 * envFps) / peakLag;
+  // --- Sub-frame refinement ----------------------------------------------
+  // The lag grid is coarse: at 128 BPM and ~86 fps the period is ~40 frames,
+  // so integer lags quantise the answer to ±1.6 BPM. Fitting a parabola
+  // through the peak and its neighbours recovers the true maximum.
+  const refinedLag = parabolicPeak(score, peakLag, minLag, maxLag);
+  const bpm = (60 * envFps) / refinedLag;
+
+  // --- Confidence ---------------------------------------------------------
+  // Prominence of the winning peak over the median of the score curve.
+  const window: number[] = [];
+  for (let lag = minLag; lag <= maxLag; lag++) window.push(score[lag]);
+  window.sort((a, b) => a - b);
+  const median = window[Math.floor(window.length / 2)] || 1e-9;
+  const prominence = peakVal / Math.max(1e-9, median);
+  const confidence = clamp01((prominence - 1) / 4);
+
   return { bpm, confidence };
+}
+
+/**
+ * Parabolic interpolation around a discrete maximum.
+ * Returns a fractional index; falls back to the integer peak at the edges
+ * or when the three points do not form a peak.
+ */
+function parabolicPeak(
+  data: Float32Array,
+  peak: number,
+  lo: number,
+  hi: number
+): number {
+  if (peak <= lo || peak >= hi) return peak;
+  const yPrev = data[peak - 1];
+  const yHere = data[peak];
+  const yNext = data[peak + 1];
+  const denom = yPrev - 2 * yHere + yNext;
+  if (denom === 0 || !Number.isFinite(denom)) return peak;
+  const delta = (0.5 * (yPrev - yNext)) / denom;
+  // A well-formed peak has |delta| <= 0.5; anything larger means we are on a
+  // slope, not a maximum, so keep the integer lag.
+  if (!Number.isFinite(delta) || Math.abs(delta) > 0.5) return peak;
+  return peak + delta;
 }
 
 /**

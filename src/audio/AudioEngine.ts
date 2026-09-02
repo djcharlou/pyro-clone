@@ -15,6 +15,9 @@ export class AudioEngine {
   readonly deckA: Deck;
   readonly deckB: Deck;
 
+  /** Safety limiter on the master bus — see constructor. */
+  readonly limiter: DynamicsCompressorNode;
+
   private activeDeck: ActiveDeck = 'A';
   private listeners: EngineListeners;
   private transitionTimer: number | null = null;
@@ -26,8 +29,22 @@ export class AudioEngine {
     // Equal-power crossfade sums both decks at ~0.7 mid-fade; if each is
     // near unity and content is peak-normalized, the sum can hit 1.4.
     // A conservative master keeps headroom for that + fills of stacked EQs.
-    this.master.gain.value = 0.72;
-    this.master.connect(this.ctx.destination);
+    this.master.gain.value = 0.85;
+
+    // Brick-wall-ish limiter after the master fader. Headroom alone can't
+    // save us when two loud masters overlap mid-crossfade, and hard digital
+    // clipping is exactly the harsh, "cheap" sound to avoid. A high ratio
+    // with a fast attack and musical release catches those peaks without
+    // pumping the steady-state level.
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -3;
+    this.limiter.knee.value = 3;
+    this.limiter.ratio.value = 20;
+    this.limiter.attack.value = 0.003;
+    this.limiter.release.value = 0.25;
+
+    this.master.connect(this.limiter);
+    this.limiter.connect(this.ctx.destination);
 
     const notify = (): void => this.listeners.onDeckUpdate?.();
 
@@ -163,7 +180,7 @@ export class AudioEngine {
       next.scheduleStart(t0, offsetForB);
     }
 
-    // Equal-power crossfade ramp
+    // --- Equal-power crossfade ramp ---------------------------------------
     const SAMPLES = 64;
     active.gain.gain.cancelScheduledValues(t0);
     next.gain.gain.cancelScheduledValues(t0);
@@ -179,7 +196,61 @@ export class AudioEngine {
     active.gain.gain.setValueAtTime(0, t1 + 0.001);
     next.gain.gain.setValueAtTime(1, t1 + 0.001);
 
+    // --- Bass swap ---------------------------------------------------------
+    // Two full-range tracks played on top of each other stack their kick and
+    // bass, which is the muddy "two songs at once" sound rather than a mix.
+    // Real DJs keep only one low end at a time: the incoming track enters
+    // with its bass pulled down, and at the midpoint the two swap over about
+    // a beat. Skipped for degraded/short fades where it would be audible as
+    // an effect rather than a transition.
+    const beatDurA = 60 / bpmA;
+    const doBassSwap = fadeDur >= 5 && withinSafe;
+    if (doBassSwap) {
+      const BASS_CUT_DB = -22;
+      const tMid = t0 + fadeDur * 0.5;
+      const swapDur = Math.min(beatDurA, fadeDur * 0.12);
+
+      next.lowEQ.gain.cancelScheduledValues(t0);
+      active.lowEQ.gain.cancelScheduledValues(t0);
+
+      // Incoming: bass out for the first half, then in.
+      next.lowEQ.gain.setValueAtTime(BASS_CUT_DB, t0);
+      next.lowEQ.gain.setValueAtTime(BASS_CUT_DB, tMid);
+      next.lowEQ.gain.linearRampToValueAtTime(0, tMid + swapDur);
+
+      // Outgoing: bass in until the midpoint, then out.
+      active.lowEQ.gain.setValueAtTime(active.lowEQ.gain.value, t0);
+      active.lowEQ.gain.setValueAtTime(0, tMid);
+      active.lowEQ.gain.linearRampToValueAtTime(BASS_CUT_DB, tMid + swapDur);
+
+      // The outgoing deck is leaving anyway; sweeping a gentle high-pass over
+      // its tail thins it out under the incoming track instead of just
+      // turning it down.
+      active.hp.frequency.cancelScheduledValues(tMid);
+      active.hp.frequency.setValueAtTime(20, tMid);
+      active.hp.frequency.exponentialRampToValueAtTime(420, t1);
+    }
+
     active.scheduleStop(t1 + 0.1);
+
+    // --- Release the beat-match -------------------------------------------
+    // Once the incoming track is alone it should run at its own tempo again,
+    // otherwise every track after the first stays permanently pitched. An
+    // exponential glide spread over several seconds is inaudible.
+    if (withinSafe && Math.abs(appliedRatio - 1) > 0.002) {
+      const releaseStart = t1 + 0.2;
+      const releaseDur = Math.min(10, Math.max(5, fadeDur * 0.6));
+      next.glideStretchTo(1, releaseStart, releaseDur);
+    }
+
+    // Reset the outgoing deck's EQ/filter once it is silent, so it starts
+    // clean the next time it is used.
+    window.setTimeout(() => {
+      active.lowEQ.gain.cancelScheduledValues(this.ctx.currentTime);
+      active.lowEQ.gain.value = 0;
+      active.hp.frequency.cancelScheduledValues(this.ctx.currentTime);
+      active.hp.frequency.value = 20;
+    }, Math.max(0, (t1 + 0.3 - this.ctx.currentTime) * 1000));
 
     console.info(
       `[crossfade] A=${bpmA.toFixed(1)}BPM B=${bpmB.toFixed(1)}BPM ` +

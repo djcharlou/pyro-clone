@@ -21,6 +21,7 @@ import { smartReorderQueue } from './selector/smartReorder';
 import { store } from './db/IndexedDBStore';
 import { completeLoginIfCallback, loadAuth, type SpotifyAuthState } from './spotify/oauth';
 import { enrichWithSpotify } from './spotify/enrichment';
+import { initPlayer, playSpotifyUris, type PlayerBridge } from './spotify/player';
 import {
   importFiles,
   importViaDirectoryPicker,
@@ -74,6 +75,7 @@ export function App(): JSX.Element {
   const [spotifyAuth, setSpotifyAuth] = useState<SpotifyAuthState | null>(() => loadAuth());
   const [enrichmentBusy, setEnrichmentBusy] = useState(false);
   const [enrichmentStatus, setEnrichmentStatus] = useState('');
+  const [playbackBridge, setPlaybackBridge] = useState<PlayerBridge | null>(null);
 
   useEffect(() => {
     const engine = new AudioEngine({
@@ -687,6 +689,31 @@ export function App(): JSX.Element {
     handleEnrichAll();
   }
 
+  async function handleEnablePlayback(): Promise<void> {
+    try {
+      // Show a placeholder bridge state so the UI reflects "connecting…"
+      setPlaybackBridge({ ready: false, deviceId: null, state: null, error: null });
+      await initPlayer((bridge) => setPlaybackBridge(bridge));
+    } catch (err) {
+      setPlaybackBridge({
+        ready: false,
+        deviceId: null,
+        state: null,
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  async function handlePlayUri(uri: string): Promise<void> {
+    try {
+      await playSpotifyUris([uri]);
+    } catch (err) {
+      setPlaybackBridge((prev) =>
+        prev ? { ...prev, error: (err as Error).message } : prev
+      );
+    }
+  }
+
   return (
     <div className={`app app--${view}`}>
       <header className="app-header">
@@ -887,6 +914,9 @@ export function App(): JSX.Element {
         enrichmentBusy={enrichmentBusy}
         tracksTotal={tracks.length}
         tracksWithoutSpotify={tracks.filter((t) => !t.analysis?.spotifyTrackId).length}
+        playbackBridge={playbackBridge}
+        onEnablePlayback={() => void handleEnablePlayback()}
+        onPlayUri={(uri) => void handlePlayUri(uri)}
       />
 
       <PlaylistsSheet

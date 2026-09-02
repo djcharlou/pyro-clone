@@ -20,6 +20,7 @@ import {
   rms,
 } from './dsp';
 import { estimateKey } from './key';
+import { bpmFromName, reconcileBpm } from './bpmFromName';
 import { computeIntegratedLufs } from './loudness';
 
 const ANALYSIS_RATE = 22050;
@@ -31,17 +32,30 @@ export interface AnalyzeInput {
   channels: Float32Array[];
   sampleRate: number;
   durationSec: number;
+  /**
+   * Filename or title, used to read a BPM that is already written in the
+   * name (DJ-edit packs almost always include it). When present it beats
+   * anything we can estimate from the audio.
+   */
+  nameHint?: string;
 }
 
 export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   const mono = mixdownToMono(input.channels);
   const downsampled = resample(mono, input.sampleRate, ANALYSIS_RATE);
 
-  // Tempo
+  // Tempo — audio estimate first, then reconciled with any BPM written in
+  // the filename. The name wins when present: for DJ-edit libraries it is
+  // ground truth, and it removes the octave guesswork entirely.
   const env = energyEnvelope(downsampled, ENV_WINDOW);
   const onsets = onsetEnvelope(env);
-  const { bpm: rawBpm, confidence: bpmConfidence } = estimateBpmFromOnsets(onsets, ENV_FPS);
-  const bpm = normalizeBpmOctave(rawBpm);
+  const estimated = estimateBpmFromOnsets(onsets, ENV_FPS);
+  const named = input.nameHint ? bpmFromName(input.nameHint) : null;
+  const reconciled = reconcileBpm(named, estimated);
+  const bpm = reconciled.source === 'name'
+    ? reconciled.bpm
+    : normalizeBpmOctave(reconciled.bpm);
+  const bpmConfidence = reconciled.confidence;
 
   // Beat grid
   const firstBeatTime = estimateFirstBeat(onsets, bpm, ENV_FPS);
