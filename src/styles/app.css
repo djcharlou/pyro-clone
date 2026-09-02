@@ -492,10 +492,66 @@ input[type="text"] {
 .np-times {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
 }
+.np-countdown {
+  background: rgba(255, 215, 106, 0.18);
+  color: #ffd76a;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.np-mixing-badge {
+  background: rgba(127, 255, 157, 0.2);
+  color: #7fff9d;
+  padding: 3px 10px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+.now-playing--mixing {
+  border-top: 2px solid #7fff9d;
+  border-bottom: 2px solid #7fff9d;
+}
+.np-next {
+  margin: 12px -18px 0;
+  padding: 10px 18px 4px;
+  background: rgba(127, 255, 157, 0.06);
+  border-top: 1px solid rgba(127, 255, 157, 0.25);
+}
+.np-next-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.np-next-label {
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #7fff9d;
+  font-size: 10px;
+}
+.np-next-title { font-weight: 700; color: #fff; }
+.np-next-artist { color: rgba(255,255,255,0.65); }
+.np-next-bpm {
+  margin-left: auto;
+  color: rgba(127,255,157,0.85);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 10px;
+}
+.np-waveform-wrap--next { margin-top: 4px; }
 .np-transport {
   display: flex;
   justify-content: center;
@@ -546,7 +602,7 @@ input[type="text"] {
 /* QueueCard */
 .qcard {
   display: grid;
-  grid-template-columns: 44px 1fr auto auto;
+  grid-template-columns: auto 44px 1fr auto 34px auto;
   align-items: center;
   gap: 10px;
   padding: 8px 12px 8px 8px;
@@ -554,9 +610,33 @@ input[type="text"] {
   box-shadow: var(--card-shadow);
   position: relative;
   min-height: 60px;
-  transition: transform 0.08s ease-out;
+  transition: transform 0.08s ease-out, opacity 0.15s;
 }
 .qcard:active { transform: scale(0.99); }
+.qcard-grip {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  padding: 0 2px;
+  cursor: grab;
+  letter-spacing: -2px;
+  user-select: none;
+}
+.qcard--draggable:hover .qcard-grip { color: #fff; }
+.qcard--draggable[draggable="true"]:active { cursor: grabbing; }
+.qcard--dragging { opacity: 0.45; }
+.qcard--drop { outline: 2px dashed rgba(255, 255, 255, 0.9); outline-offset: -2px; }
+.qcard-score {
+  min-width: 30px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 11px;
+  padding: 3px 6px;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
+}
 .qcard-cover {
   width: 44px;
   height: 44px;

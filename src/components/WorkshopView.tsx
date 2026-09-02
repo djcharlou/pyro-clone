@@ -3,6 +3,7 @@ import type { AnalyzedTrack } from '@shared/types';
 import { LibraryTable, type EditableField } from './LibraryTable';
 import { BulkEditPanel } from './BulkEditPanel';
 import { DuplicatesPanel } from './DuplicatesPanel';
+import { RenameSheet } from './RenameSheet';
 import { findDuplicates } from '@/library/dedupe';
 import { writeTagsBatch, type TagEdits, type WriteMode } from '@/library/tagWriter';
 import { store } from '@/db/IndexedDBStore';
@@ -21,6 +22,7 @@ export function WorkshopView(): JSX.Element {
   const [writing, setWriting] = useState(false);
   const [writeMode, setWriteMode] = useState<WriteMode | null>(null);
   const [writeStatus, setWriteStatus] = useState<string>('');
+  const [renameOpen, setRenameOpen] = useState(false);
 
   const selectionArray = useMemo(
     () => tracks.filter((t) => selection.has(t.id)),
@@ -165,19 +167,41 @@ export function WorkshopView(): JSX.Element {
       )}
 
       {tab === 'all' && (
-        <BulkEditPanel
-          selection={selectionArray}
-          onApply={(p) => void handleBulkApply(p)}
-          onWriteToFiles={() => void handleWriteToFiles()}
-          onClear={() => setSelection(new Set())}
-          writing={writing}
-          writeMode={writeMode}
-        />
+        <>
+          <BulkEditPanel
+            selection={selectionArray}
+            onApply={(p) => void handleBulkApply(p)}
+            onWriteToFiles={() => void handleWriteToFiles()}
+            onClear={() => setSelection(new Set())}
+            writing={writing}
+            writeMode={writeMode}
+          />
+          {selectionArray.length > 0 && (
+            <div className="workshop-status" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                className="bulk-btn"
+                onClick={() => setRenameOpen(true)}
+                title="Bulk rename files by template"
+              >
+                ✎ Rename {selectionArray.length}…
+              </button>
+              <span style={{ fontSize: 11, opacity: 0.7 }}>
+                {`{artist} - {title} [{camelot} {bpm}]`}
+              </span>
+            </div>
+          )}
+        </>
       )}
 
       {writeStatus && (
         <div className="workshop-status">{writeStatus}</div>
       )}
+
+      <RenameSheet
+        open={renameOpen}
+        selection={selectionArray}
+        onClose={() => setRenameOpen(false)}
+      />
     </div>
   );
 }

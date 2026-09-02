@@ -244,7 +244,31 @@ export function App(): JSX.Element {
     const engine = engineRef.current;
     if (!engine) return;
     const active = engine.getActive();
-    if (!active.track || !active.isPlaying) return;
+
+    // AUTO-START: if nothing is playing and there's material to work with,
+    // kick things off automatically. Also covers the "track ended without
+    // a crossfade because auto-mix couldn't schedule one in time" case.
+    if (!active.track || !active.isPlaying) {
+      if (loadingNextRef.current) return;
+      loadingNextRef.current = true;
+      try {
+        const playedSet = new Set(session.history);
+        // Pick first queue entry not yet played, else first library track
+        const firstQueuedId = queue.find((id) => !playedSet.has(id));
+        const first = firstQueuedId
+          ? tracksById.get(firstQueuedId) ?? null
+          : tracks.find((t) => t.analysis && fileRegistry.has(t.id) && !playedSet.has(t.id)) ?? null;
+        if (!first) return;
+        if (active.track?.id !== first.id) {
+          await loadTrackIntoActive(first);
+        }
+        engine.playActive(first.analysis?.cues.mixInPoint ?? 0);
+      } finally {
+        loadingNextRef.current = false;
+      }
+      return;
+    }
+
     const bpmA = active.bpm;
     const fadeBeats = 32;
     const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
@@ -265,9 +289,8 @@ export function App(): JSX.Element {
     const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
     engine.crossfade({ durationBeats: fadeBeats, deckBStartOffset: offset });
     // Pop from queue if the loaded inactive matches the head
-    if (queue.length > 0 && queue[0] === inactive.track.id) {
-      popQueue();
-    }
+    /* Queue is a playlist — do NOT pop it. History tracks what already
+     * played; loadNextIntoInactive skips history entries. */
   }
 
   async function loadNextIntoInactive(): Promise<void> {
@@ -275,9 +298,13 @@ export function App(): JSX.Element {
     if (!engine) return;
     loadingNextRef.current = true;
     try {
-      // Prefer the head of the queue if any
-      if (queue.length > 0) {
-        const next = tracksById.get(queue[0]);
+      // Prefer the first queue entry NOT already played this session.
+      // The queue behaves like a playlist — entries stay put; history
+      // is what makes us advance through them.
+      const playedSet = new Set(session.history);
+      const nextIdInQueue = queue.find((id) => !playedSet.has(id));
+      if (nextIdInQueue) {
+        const next = tracksById.get(nextIdInQueue);
         if (next) {
           await loadTrackIntoInactive(next);
           return;
@@ -406,12 +433,11 @@ export function App(): JSX.Element {
         pushHistory(active.track.id);
       }
     } else if (queueTracks.length > 0) {
-      // Start from the queue
+      // Start from the queue — playlist mode, don't pop
       void (async () => {
         const first = queueTracks[0];
         await loadTrackIntoActive(first);
         engine.playActive(first.analysis?.cues.mixInPoint ?? 0);
-        popQueue();
       })();
     }
     forceUpdate((x) => x + 1);
@@ -422,15 +448,13 @@ export function App(): JSX.Element {
     if (!engine) return;
     const inactive = engine.getInactive();
     if (!inactive.track) {
-      // Load next from queue first
       await loadNextIntoInactive();
     }
     if (engine.getInactive().track) {
       const offset = engine.getInactive().track!.analysis?.cues.mixInPoint ?? 0;
+      // 8-beat quick beat-matched fade for manual skip
       engine.crossfade({ durationBeats: 8, minDurationSec: 2, deckBStartOffset: offset });
-      if (queue.length > 0 && queue[0] === engine.getInactive().track!.id) {
-        popQueue();
-      }
+      /* No popQueue — playlist stays put, history advances via onTransitionEnd */
     }
   }
 
@@ -450,7 +474,9 @@ export function App(): JSX.Element {
     if (!engine) return;
     await loadTrackIntoActive(track);
     engine.playActive(track.analysis?.cues.mixInPoint ?? 0);
-    removeFromQueue(id);
+    pushHistory(id);
+    /* Keep the entry in the playlist — history advancement is enough
+     * for the auto-mix to skip it next round. */
   }
 
   // Sheet handlers
@@ -597,6 +623,17 @@ export function App(): JSX.Element {
             onPlayPause={handlePlayPause}
             onSkip={() => void handleSkip()}
             onSeekFraction={handleSeek}
+            nextTrack={
+              engineRef.current?.getInactive().track
+                ? tracksById.get(engineRef.current.getInactive().track!.id) ?? engineRef.current.getInactive().track
+                : null
+            }
+            nextIsPlaying={engineRef.current?.getInactive().isPlaying ?? false}
+            nextPositionSec={engineRef.current?.getInactive().positionSec() ?? 0}
+            nextDurationSec={engineRef.current?.getInactive().duration ?? 0}
+            nextStretchRatio={engineRef.current?.getInactive().getStretchRatio() ?? 1}
+            autoMixOn={autoMix}
+            autoMixInSec={autoMixNextInSec}
           />
 
           <main className="main">
@@ -614,6 +651,8 @@ export function App(): JSX.Element {
             )}
             <QueueList
               queueTracks={queueTracks}
+              currentTrack={currentTrack}
+              session={session}
               onRemove={removeFromQueue}
               onMove={moveInQueue}
               onPlayNow={(id) => void handlePlayNowFromQueue(id)}

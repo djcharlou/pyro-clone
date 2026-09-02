@@ -11,6 +11,17 @@ interface Props {
   onPlayPause(): void;
   onSkip(): void;
   onSeekFraction(x: number): void;
+
+  /** Second deck info — shown ONLY when it is currently playing (mid-mix). */
+  nextTrack?: AnalyzedTrack | null;
+  nextPositionSec?: number;
+  nextDurationSec?: number;
+  nextIsPlaying?: boolean;
+  nextStretchRatio?: number;
+
+  /** Seconds until the auto-mix fade starts (null if not armed). */
+  autoMixInSec?: number | null;
+  autoMixOn?: boolean;
 }
 
 export function NowPlaying({
@@ -23,13 +34,22 @@ export function NowPlaying({
   onPlayPause,
   onSkip,
   onSeekFraction,
+  nextTrack,
+  nextPositionSec = 0,
+  nextDurationSec = 0,
+  nextIsPlaying = false,
+  nextStretchRatio = 1,
+  autoMixInSec = null,
+  autoMixOn = false,
 }: Props): JSX.Element {
   const progress = durationSec > 0 ? positionSec / durationSec : 0;
+  const nextProgress = nextDurationSec > 0 ? nextPositionSec / nextDurationSec : 0;
+  const inMix = !!nextTrack && nextIsPlaying;
 
   const coverUrl = track?.coverArtDataUrl;
 
   return (
-    <section className={`now-playing ${playing ? 'now-playing--playing' : ''}`}>
+    <section className={`now-playing ${playing ? 'now-playing--playing' : ''} ${inMix ? 'now-playing--mixing' : ''}`}>
       {coverUrl && (
         <div
           className="np-backdrop"
@@ -72,28 +92,72 @@ export function NowPlaying({
           onSeekFraction((e.clientX - rect.left) / rect.width);
         }}
       >
-        <Waveform peaks={track?.analysis?.waveform} progress={progress} height={64} />
+        <Waveform
+          peaks={track?.analysis?.waveform}
+          progress={progress}
+          height={inMix ? 46 : 64}
+          playedColor="rgba(255,255,255,0.95)"
+          remainingColor="rgba(255,255,255,0.35)"
+        />
       </div>
 
       <div className="np-times">
         <span>{formatTime(positionSec)}</span>
+        {autoMixOn && autoMixInSec !== null && autoMixInSec > 0 && !inMix && (
+          <span className="np-countdown" title="Auto-mix starts in">
+            ⚡ mix in {formatCountdown(autoMixInSec)}
+          </span>
+        )}
+        {inMix && (
+          <span className="np-mixing-badge">
+            ⇄ MIXING
+          </span>
+        )}
         <span>-{formatTime(Math.max(0, durationSec - positionSec))}</span>
       </div>
+
+      {inMix && nextTrack && (
+        <div className="np-next">
+          <div className="np-next-head">
+            <span className="np-next-label">NEXT</span>
+            <span className="np-next-title">{nextTrack.title}</span>
+            <span className="np-next-artist">— {nextTrack.artist}</span>
+            {nextTrack.analysis && (
+              <span className="np-next-bpm">
+                {(nextTrack.analysis.beatGrid.bpm * nextStretchRatio).toFixed(0)} BPM
+                {' · '}
+                {nextTrack.analysis.key.camelot}
+              </span>
+            )}
+          </div>
+          <div className="np-waveform-wrap np-waveform-wrap--next">
+            <Waveform
+              peaks={nextTrack.analysis?.waveform}
+              progress={nextProgress}
+              height={40}
+              playedColor="rgba(127, 255, 157, 0.95)"
+              remainingColor="rgba(127, 255, 157, 0.35)"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="np-transport">
         <button
           className="np-btn np-btn--secondary"
           onClick={onPlayPause}
-          disabled={!track}
+          disabled={!track && !nextTrack}
           aria-label={playing ? 'Pause' : 'Play'}
+          title={!track && !nextTrack ? 'Add a track to your queue first' : (playing ? 'Pause' : 'Play')}
         >
           {playing ? PauseIcon : PlayIcon}
         </button>
         <button
           className="np-btn np-btn--primary"
           onClick={onSkip}
-          disabled={!track}
+          disabled={!nextTrack && !track}
           aria-label="Skip to next"
+          title="Beat-matched fade to next track"
         >
           {NextIcon}
         </button>
@@ -107,6 +171,15 @@ function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatCountdown(sec: number): string {
+  if (sec >= 60) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${Math.ceil(sec)}s`;
 }
 
 const PlayIcon = (

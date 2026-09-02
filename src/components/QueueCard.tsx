@@ -2,33 +2,68 @@ import type { AnalyzedTrack } from '@shared/types';
 
 interface Props {
   track: AnalyzedTrack;
-  /** 0..1 — used to interpolate the card color across the queue */
-  tone: number;
+  /** 0..1 — match quality against the preceding track (1 = perfect). */
+  matchScore: number | null;
   onRemove(): void;
   onMoveUp?(): void;
   onMoveDown?(): void;
   onPlayNow?(): void;
+  /** HTML5 drag props (desktop). */
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragOver?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDrop?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: (e: React.DragEvent<HTMLDivElement>) => void;
+  isDropTarget?: boolean;
+  isDragging?: boolean;
 }
 
 export function QueueCard({
   track,
-  tone,
+  matchScore,
   onRemove,
   onMoveUp,
   onMoveDown,
   onPlayNow,
+  draggable,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDropTarget,
+  isDragging,
 }: Props): JSX.Element {
   const bpm = track.analysis?.beatGrid.bpm;
   const key = track.analysis?.key.camelot;
 
-  // Color goes from deep red at top of queue to amber at bottom
-  const hue = lerp(5, 35, tone);
-  const sat = lerp(80, 80, tone);
-  const lit = lerp(48, 55, tone);
-  const cardBg = `linear-gradient(90deg, hsl(${hue}, ${sat}%, ${lit}%), hsl(${hue + 6}, ${sat}%, ${lit + 4}%))`;
+  // Color by match quality — restrained: red-orange for low, warm amber
+  // for good, and a muted olive for excellent (not neon green).
+  //   0.0 → red (hue 5), 0.5 → amber (hue 32), 1.0 → warm olive (hue 55)
+  const t = matchScore === null ? 0.5 : Math.max(0, Math.min(1, matchScore));
+  const hue = lerp(5, 55, t);
+  const sat = lerp(78, 58, t);
+  const lit = lerp(46, 42, t);
+  const cardBg = `linear-gradient(90deg, hsl(${hue}, ${sat}%, ${lit}%), hsl(${hue + 6}, ${sat}%, ${lit + 3}%))`;
+  const badgeText = matchScore === null ? '—' : `${Math.round(matchScore * 100)}`;
+
+  const classes = [
+    'qcard',
+    draggable ? 'qcard--draggable' : '',
+    isDragging ? 'qcard--dragging' : '',
+    isDropTarget ? 'qcard--drop' : '',
+  ].filter(Boolean).join(' ');
 
   return (
-    <div className="qcard" style={{ background: cardBg }}>
+    <div
+      className={classes}
+      style={{ background: cardBg }}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+    >
+      {draggable && <span className="qcard-grip" aria-hidden="true">⋮⋮</span>}
       <div className="qcard-cover">
         {track.coverArtDataUrl ? (
           <img src={track.coverArtDataUrl} alt="" loading="lazy" />
@@ -43,6 +78,12 @@ export function QueueCard({
       <div className="qcard-meta">
         {bpm !== undefined && <span>{bpm.toFixed(0)}</span>}
         {key && <span>{key}</span>}
+      </div>
+      <div
+        className="qcard-score"
+        title={`Match score vs previous track: ${badgeText}/100`}
+      >
+        {badgeText}
       </div>
       <div className="qcard-actions">
         {onPlayNow && (
