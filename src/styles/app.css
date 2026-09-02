@@ -283,19 +283,20 @@ input[type="text"] {
 .queue-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   padding: 4px 4px 10px;
 }
 .queue-tool-btn {
   background: rgba(0, 0, 0, 0.32);
   color: #fff;
   border: none;
-  padding: 6px 12px;
-  border-radius: 12px;
-  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 .queue-tool-btn:hover { background: rgba(0, 0, 0, 0.5); }
 .queue-tool-count {
@@ -304,6 +305,8 @@ input[type="text"] {
   text-transform: uppercase;
   letter-spacing: 1px;
   font-weight: 600;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 /* === ADD SHEET multi-select =============================================== */

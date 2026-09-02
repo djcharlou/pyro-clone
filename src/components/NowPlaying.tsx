@@ -85,19 +85,14 @@ export function NowPlaying({
         </div>
       </div>
 
-      <div
-        className="np-waveform-wrap"
-        onClick={(e) => {
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          onSeekFraction((e.clientX - rect.left) / rect.width);
-        }}
-      >
+      <div className="np-waveform-wrap">
         <Waveform
           peaks={track?.analysis?.waveform}
           progress={progress}
-          height={inMix ? 46 : 64}
+          height={inMix ? 46 : 72}
           playedColor="rgba(255,255,255,0.95)"
           remainingColor="rgba(255,255,255,0.35)"
+          onScrub={track ? onSeekFraction : undefined}
         />
       </div>
 

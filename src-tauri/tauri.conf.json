@@ -21,7 +21,8 @@
         "fullscreen": false,
         "titleBarStyle": "Transparent",
         "hiddenTitle": true,
-        "backgroundColor": "#b91d12"
+        "backgroundColor": "#b91d12",
+        "dragDropEnabled": false
       }
     ],
     "security": {
