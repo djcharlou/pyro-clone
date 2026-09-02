@@ -17,6 +17,7 @@
     "tauri:build:win": "tauri build --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
+    "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-fs": "^2.5.2",
     "browser-id3-writer": "^6.4.0",
     "idb": "^8.0.0",

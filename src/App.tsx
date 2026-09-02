@@ -29,6 +29,7 @@ import {
   type ImportProgress,
 } from './library/Importer';
 import { importFromITunes, isTauri } from './library/itunes';
+import { pickAudioFilesNative, pickFolderNative } from './library/tauriImport';
 
 export function App(): JSX.Element {
   const [, forceUpdate] = useState(0);
@@ -53,6 +54,8 @@ export function App(): JSX.Element {
   const removeFromQueue = useStore((s) => s.removeFromQueue);
   const moveInQueue = useStore((s) => s.moveInQueue);
   const popQueue = useStore((s) => s.popQueue);
+  const clearQueue = useStore((s) => s.clearQueue);
+  const resetSession = useStore((s) => s.resetSession);
   const playlists = useStore((s) => s.playlists);
   const setPlaylists = useStore((s) => s.setPlaylists);
   const sheet = useStore((s) => s.sheet);
@@ -211,12 +214,28 @@ export function App(): JSX.Element {
   }, [tracks, queueTracks, currentTrack, session, queue]);
 
   async function loadAudioBuffer(track: AnalyzedTrack): Promise<ArrayBuffer | null> {
-    const file = await fileRegistry.getFile(track.id);
+    let file = await fileRegistry.getFile(track.id);
+    // In Tauri (native) mode, a track loaded from iTunes or scanned in a
+    // previous session may not have a registry entry yet (the in-memory
+    // map is per-session). track.filePath is the absolute path on disk —
+    // register it on the fly and retry once.
+    if (!file && isTauri() && track.filePath?.startsWith('/')) {
+      console.info('[load] re-registering tauri path for', track.title, track.filePath);
+      fileRegistry.putTauriPath(track.id, track.filePath);
+      file = await fileRegistry.getFile(track.id);
+    }
     if (!file) {
-      console.warn('[load] no file for', track.title);
+      console.warn('[load] no file available for', track.title,
+        '— filePath was', track.filePath,
+        '— run in Tauri native or re-import the folder to get a fresh file handle.');
       return null;
     }
-    return await file.arrayBuffer();
+    try {
+      return await file.arrayBuffer();
+    } catch (err) {
+      console.error('[load] arrayBuffer() failed for', track.title, err);
+      return null;
+    }
   }
 
   async function loadTrackIntoInactive(track: AnalyzedTrack): Promise<void> {
@@ -224,7 +243,13 @@ export function App(): JSX.Element {
     if (!engine) return;
     const buffer = await loadAudioBuffer(track);
     if (!buffer) return;
-    await engine.loadIntoInactive(track, buffer);
+    try {
+      await engine.loadIntoInactive(track, buffer);
+    } catch (err) {
+      console.error('[decode] failed for', track.title, err);
+      alert(`Cannot decode ${track.title}: ${(err as Error).message}`);
+      return;
+    }
     forceUpdate((x) => x + 1);
   }
 
@@ -233,7 +258,13 @@ export function App(): JSX.Element {
     if (!engine) return;
     const buffer = await loadAudioBuffer(track);
     if (!buffer) return;
-    await engine.loadIntoActive(track, buffer);
+    try {
+      await engine.loadIntoActive(track, buffer);
+    } catch (err) {
+      console.error('[decode] failed for', track.title, err);
+      alert(`Cannot decode ${track.title}: ${(err as Error).message}\n\nIf this is a DRM-protected iTunes file (.m4p) or an unusual codec, the browser cannot decode it.`);
+      return;
+    }
     if (engine.getActive().track && !engine.getActive().isPlaying) {
       pushHistory(track.id);
     }
@@ -337,10 +368,13 @@ export function App(): JSX.Element {
   }
 
   async function handleImportDirectory(): Promise<void> {
-    if (!supportsDirectoryPicker()) return;
     setImportState({ running: true, added: 0, failed: 0, lastTrackTitle: '' });
     try {
-      const summary = await importViaDirectoryPicker(handleProgress);
+      // Prefer the native Tauri picker when available — absolute paths
+      // that survive across app restarts.
+      const summary =
+        (await pickFolderNative(handleProgress)) ??
+        (supportsDirectoryPicker() ? await importViaDirectoryPicker(handleProgress) : { added: 0, skipped: 0, failed: 0 });
       setImportState({
         running: false,
         added: summary.added,
@@ -354,6 +388,26 @@ export function App(): JSX.Element {
       if ((err as DOMException).name !== 'AbortError') {
         console.error('[import]', err);
       }
+      setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
+    }
+  }
+
+  async function handleImportFilesNative(): Promise<void> {
+    setImportState({ running: true, added: 0, failed: 0, lastTrackTitle: '' });
+    try {
+      const summary = await pickAudioFilesNative(handleProgress);
+      if (!summary) return;
+      setImportState({
+        running: false,
+        added: summary.added,
+        failed: summary.failed,
+        lastTrackTitle: '',
+      });
+      const refreshed = await store.listTracks();
+      setTracks(refreshed);
+      void analyzeUnanalyzed(refreshed);
+    } catch (err) {
+      console.error('[import-native]', err);
       setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
     }
   }
@@ -637,14 +691,28 @@ export function App(): JSX.Element {
           />
 
           <main className="main">
-            {queue.length > 1 && (
+            {queue.length > 0 && (
               <div className="queue-toolbar">
+                {queue.length > 1 && (
+                  <button
+                    className="queue-tool-btn"
+                    onClick={handleSmartReorder}
+                    title="Reorder the queue for best transitions"
+                  >
+                    🎯 Smart reorder
+                  </button>
+                )}
                 <button
                   className="queue-tool-btn"
-                  onClick={handleSmartReorder}
-                  title="Reorder the queue for best transitions"
+                  onClick={() => {
+                    if (confirm(`Clear ${queue.length} track${queue.length > 1 ? 's' : ''} from the queue?`)) {
+                      clearQueue();
+                      resetSession();
+                    }
+                  }}
+                  title="Empty the queue and reset the session history"
                 >
-                  🎯 Smart reorder
+                  🗑️ Clear playlist
                 </button>
                 <span className="queue-tool-count">{queue.length} in queue</span>
               </div>
@@ -696,16 +764,23 @@ export function App(): JSX.Element {
         onAddMany={(ids) => addManyToQueue(ids.filter((id) => !queueIds.has(id)))}
         onImportFolder={() => void handleImportDirectory()}
         onImportFiles={() => {
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.multiple = true;
-          input.accept = 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus';
-          input.onchange = () => {
-            if (input.files) void handleImportFiles(input.files);
-          };
-          input.click();
+          // Native (Tauri) → dialog.open() gives absolute paths persistable
+          // across app restarts. Browser → <input> gives File objects that
+          // only live in memory.
+          if (isTauri()) {
+            void handleImportFilesNative();
+          } else {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = 'audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus';
+            input.onchange = () => {
+              if (input.files) void handleImportFiles(input.files);
+            };
+            input.click();
+          }
         }}
-        supportsDirectoryPicker={supportsDirectoryPicker()}
+        supportsDirectoryPicker={supportsDirectoryPicker() || isTauri()}
         supportsITunes={isTauri()}
         onImportITunes={() => void handleImportITunes()}
       />
