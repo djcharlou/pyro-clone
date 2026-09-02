@@ -95,18 +95,32 @@ export function WorkshopView(): JSX.Element {
     setWriteStatus('');
     const edits = selectionArray
       .filter((t) => t.filePath.toLowerCase().endsWith('.mp3'))
-      .map((t) => ({
-        track: t,
-        changes: {
-          title: t.title,
-          artist: t.artist,
-          album: t.album,
-          genre: t.genre,
-          bpm: t.analysis?.beatGrid.bpm,
-          key: t.analysis ? camelotToTraktorKey(t.analysis.key.camelot) : undefined,
-          camelot: t.analysis?.key.camelot,
-        } satisfies TagEdits,
-      }));
+      .map((t) => {
+        const a = t.analysis;
+        const serato = a
+          ? {
+              bpm: a.beatGrid.bpm,
+              autoGainDb: a.loudness ? clampGain(a.loudness.suggestedGainDb) : 0,
+              gainDb: 0,
+              beats: a.beatGrid.beats,
+              bpmLocked: true,
+              trackColor: 0xffffff,
+            }
+          : undefined;
+        return {
+          track: t,
+          changes: {
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            genre: t.genre,
+            bpm: a?.beatGrid.bpm,
+            key: a ? camelotToTraktorKey(a.key.camelot) : undefined,
+            camelot: a?.key.camelot,
+            serato,
+          } satisfies TagEdits,
+        };
+      });
     const skipped = selectionArray.length - edits.length;
     if (edits.length === 0) {
       setWriting(false);
@@ -204,6 +218,10 @@ export function WorkshopView(): JSX.Element {
       />
     </div>
   );
+}
+
+function clampGain(db: number): number {
+  return Math.max(-12, Math.min(12, db));
 }
 
 /**

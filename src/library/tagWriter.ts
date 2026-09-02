@@ -2,6 +2,13 @@ import { ID3Writer } from 'browser-id3-writer';
 import type { Track, AnalyzedTrack } from '@shared/types';
 import { store } from '@/db/IndexedDBStore';
 import { fileRegistry } from '@/library/Importer';
+import {
+  encodeSeratoAutotags,
+  encodeSeratoBeatGrid,
+  encodeSeratoMarkers2,
+  type SeratoCue,
+} from './seratoTags';
+import { injectGeobFrames, type GeobFrame } from './id3v2Geob';
 
 export interface TagEdits {
   title?: string;
@@ -13,6 +20,16 @@ export interface TagEdits {
   key?: string;
   camelot?: string;
   comment?: string;
+  /** Analysis data to embed as Serato-compatible GEOB frames. */
+  serato?: {
+    bpm: number;
+    autoGainDb?: number;
+    gainDb?: number;
+    beats?: number[];
+    cues?: SeratoCue[];
+    trackColor?: number;
+    bpmLocked?: boolean;
+  };
 }
 
 export type WriteMode = 'in-place' | 'download';
@@ -63,9 +80,20 @@ export async function writeTagsToFile(
     description: 'CAMELOT',
     value: edits.camelot,
   });
-  const buffer = writer.addTag();
-  const blob = writer.getBlob();
-  const bytes = buffer.byteLength;
+  let taggedBuffer: ArrayBuffer = writer.addTag();
+
+  // Serato-compatible GEOB frames — injected AFTER browser-id3-writer's tag
+  // so we can co-exist with its standard frames without re-implementing them.
+  if (edits.serato) {
+    const geob = buildSeratoGeobFrames(edits.serato);
+    if (geob.length > 0) {
+      const injected = injectGeobFrames(new Uint8Array(taggedBuffer), geob);
+      taggedBuffer = injected.buffer.slice(injected.byteOffset, injected.byteOffset + injected.byteLength) as ArrayBuffer;
+    }
+  }
+
+  const bytes = taggedBuffer.byteLength;
+  const blob = new Blob([taggedBuffer], { type: 'audio/mpeg' });
 
   // Try in-place write via File System Access API
   const handle = await store.getFileHandle(track.id);
@@ -80,6 +108,35 @@ export async function writeTagsToFile(
   const filename = suggestFilename(track.filePath);
   triggerDownload(blob, filename);
   return { mode: 'download', bytesWritten: bytes, filename };
+}
+
+function buildSeratoGeobFrames(s: NonNullable<TagEdits['serato']>): GeobFrame[] {
+  const frames: GeobFrame[] = [];
+  frames.push({
+    mime: 'application/octet-stream',
+    filename: '',
+    description: 'Serato Autotags',
+    data: encodeSeratoAutotags(s.bpm, s.autoGainDb ?? 0, s.gainDb ?? 0),
+  });
+  if (s.beats && s.beats.length > 0) {
+    frames.push({
+      mime: 'application/octet-stream',
+      filename: '',
+      description: 'Serato BeatGrid',
+      data: encodeSeratoBeatGrid(s.beats, s.bpm),
+    });
+  }
+  frames.push({
+    mime: 'application/octet-stream',
+    filename: '',
+    description: 'Serato Markers2',
+    data: encodeSeratoMarkers2({
+      trackColor: s.trackColor,
+      bpmLocked: s.bpmLocked ?? true,
+      cues: s.cues,
+    }),
+  });
+  return frames;
 }
 
 export async function writeTagsBatch(
