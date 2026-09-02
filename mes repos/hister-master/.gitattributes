@@ -1,2 +1,0 @@
-server/vectorstore/sqlitevec/*.c linguist-vendored
-server/vectorstore/sqlitevec/*.h linguist-vendored

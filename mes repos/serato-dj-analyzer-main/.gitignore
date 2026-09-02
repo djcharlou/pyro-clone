@@ -1,6 +1,0 @@
-.env
-.venv
-/temp
-/lib/instance/serato.db
-NOTES.md
-.pytest_cache
