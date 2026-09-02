@@ -1,6 +1,7 @@
 import type { AnalyzedTrack, TrackAnalysis, Track } from '@shared/types';
 import type { AnalyzeRequest, AnalyzeResponse } from './worker';
 import { fileRegistry } from '@/library/Importer';
+import { readSeratoData } from '@/library/seratoRead';
 
 interface PendingJob {
   resolve(a: TrackAnalysis): void;
@@ -45,7 +46,11 @@ export class AnalysisQueue {
       this.queue.push(async () => {
         try {
           this.onProgress?.({ trackId: track.id, phase: 'decoding' });
-          const audioBuffer = await this.decodeTrack(track.id);
+          // Read the raw bytes once: they feed both the Serato tag reader
+          // and the audio decoder, so we avoid loading the file twice.
+          const raw = await this.readTrackBytes(track.id);
+          const serato = extractSeratoHints(raw);
+          const audioBuffer = await this.decodeBytes(raw);
           this.onProgress?.({ trackId: track.id, phase: 'analyzing' });
           const channels: Float32Array[] = [];
           for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
@@ -56,6 +61,7 @@ export class AnalysisQueue {
             // Filename first: DJ-edit packs write the real BPM there, and
             // the title tag is often missing or wrong on those files.
             nameHint: `${track.filePath ?? ''} ${track.title ?? ''}`,
+            serato,
             channels,
             sampleRate: audioBuffer.sampleRate,
             durationSec: audioBuffer.duration,
@@ -92,11 +98,16 @@ export class AnalysisQueue {
     }
   }
 
-  private async decodeTrack(trackId: string): Promise<AudioBuffer> {
+  private async readTrackBytes(trackId: string): Promise<ArrayBuffer> {
     const file = await fileRegistry.getFile(trackId);
     if (!file) throw new Error(`No file handle available for track ${trackId}`);
-    const buf = await file.arrayBuffer();
-    return await this.decodeCtx.decodeAudioData(buf);
+    return await file.arrayBuffer();
+  }
+
+  private async decodeBytes(raw: ArrayBuffer): Promise<AudioBuffer> {
+    // decodeAudioData detaches the buffer it is given, so hand it a copy and
+    // keep `raw` intact for the tag reader.
+    return await this.decodeCtx.decodeAudioData(raw.slice(0));
   }
 
   private analyzeInWorker(input: {
@@ -105,6 +116,7 @@ export class AnalysisQueue {
     sampleRate: number;
     durationSec: number;
     nameHint?: string;
+    serato?: { bpm: number; firstBeatSec: number; cueSecs?: number[] };
   }): Promise<TrackAnalysis> {
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
@@ -120,5 +132,28 @@ export class AnalysisQueue {
   destroy(): void {
     this.worker.terminate();
     this.pending.clear();
+  }
+}
+
+/**
+ * Pull tempo, beat anchor and cues out of a file's Serato GEOB frames.
+ * Returns undefined for files Serato has never touched, in which case the
+ * pipeline falls back to filename parsing and then audio estimation.
+ */
+function extractSeratoHints(raw: ArrayBuffer):
+  | { bpm: number; firstBeatSec: number; cueSecs?: number[] }
+  | undefined {
+  try {
+    const data = readSeratoData(new Uint8Array(raw));
+    if (!data) return undefined;
+    const bpm = data.autotags?.bpm ?? data.beatGrid?.markers?.[0]?.bpm;
+    const firstBeatSec = data.beatGrid?.markers?.[0]?.position;
+    if (!bpm || !Number.isFinite(bpm) || bpm <= 0) return undefined;
+    if (firstBeatSec === undefined || !Number.isFinite(firstBeatSec)) return undefined;
+    const cueSecs = data.cues.length ? data.cues.map((c) => c.positionSec) : undefined;
+    return { bpm, firstBeatSec, cueSecs };
+  } catch {
+    // A malformed tag must never block analysis.
+    return undefined;
   }
 }

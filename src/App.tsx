@@ -32,6 +32,7 @@ import {
 import { importFromITunes, isTauri } from './library/itunes';
 import { pickAudioFilesNative, pickFolderNative } from './library/tauriImport';
 import { effectiveMixInPoint, effectiveMixOutPoint } from './library/cues';
+import { resyncLibrary } from './analyzer/resyncFromTags';
 
 export function App(): JSX.Element {
   const [, forceUpdate] = useState(0);
@@ -103,6 +104,33 @@ export function App(): JSX.Element {
       ]);
       setTracks(initialTracks);
       setPlaylists(initialPlaylists);
+
+      // Repair tempo data from authoritative sources before anything plays.
+      // Serato writes its exact BPM and beat anchor into the file's ID3
+      // tags, and DJ-edit packs put the tempo in the filename — both beat
+      // whatever an older build of the estimator guessed. This reads files
+      // but never decodes them, so it is quick even on a large library.
+      void (async () => {
+        try {
+          const { updates, report } = await resyncLibrary(initialTracks);
+          if (updates.length === 0) return;
+          for (const u of updates) {
+            await store.saveAnalysis(u.analysis);
+          }
+          const refreshed = await store.listTracks();
+          setTracks(refreshed);
+          const bySerato = report.updated.filter((u) => u.source === 'serato').length;
+          console.info(
+            `[resync] corrected ${updates.length}/${report.scanned} tempos ` +
+            `(${bySerato} from Serato tags, ${updates.length - bySerato} from filename)`
+          );
+          for (const u of report.updated.slice(0, 20)) {
+            console.info(`[resync]   ${u.fromBpm.toFixed(1)} -> ${u.toBpm.toFixed(2)} (${u.source})  ${u.title}`);
+          }
+        } catch (err) {
+          console.error('[resync] failed', err);
+        }
+      })();
       // Complete Spotify OAuth if we came back with ?code=
       try {
         const auth = await completeLoginIfCallback();

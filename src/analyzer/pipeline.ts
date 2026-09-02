@@ -38,6 +38,17 @@ export interface AnalyzeInput {
    * anything we can estimate from the audio.
    */
   nameHint?: string;
+  /**
+   * Analysis Serato already stored in the file's ID3 GEOB frames. This is
+   * the highest-authority source we have: a real tempo to two decimals and
+   * an exact first-beat anchor, so when it is present we skip tempo
+   * estimation entirely.
+   */
+  serato?: {
+    bpm: number;
+    firstBeatSec: number;
+    cueSecs?: number[];
+  };
 }
 
 export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
@@ -52,13 +63,20 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   const estimated = estimateBpmFromOnsets(onsets, ENV_FPS);
   const named = input.nameHint ? bpmFromName(input.nameHint) : null;
   const reconciled = reconcileBpm(named, estimated);
-  const bpm = reconciled.source === 'name'
-    ? reconciled.bpm
-    : normalizeBpmOctave(reconciled.bpm);
-  const bpmConfidence = reconciled.confidence;
 
-  // Beat grid
-  const firstBeatTime = estimateFirstBeat(onsets, bpm, ENV_FPS);
+  // Serato's own analysis wins outright when the file carries it.
+  const bpm = input.serato
+    ? input.serato.bpm
+    : reconciled.source === 'name'
+      ? reconciled.bpm
+      : normalizeBpmOctave(reconciled.bpm);
+  const bpmConfidence = input.serato ? 1 : reconciled.confidence;
+
+  // Beat grid — Serato's marker is an exact anchor, so prefer it over the
+  // comb-filter search when available.
+  const firstBeatTime = input.serato
+    ? input.serato.firstBeatSec
+    : estimateFirstBeat(onsets, bpm, ENV_FPS);
   const { beats, downbeats } = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
   const isStable = checkBeatStability(beats);
 
@@ -68,7 +86,7 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     bpmConfidence,
     beats,
     downbeats,
-    isStable,
+    isStable: input.serato ? true : isStable,
   };
 
   // Key

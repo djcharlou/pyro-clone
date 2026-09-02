@@ -489,8 +489,13 @@ input[type="text"] {
 .np-stretch { color: #ffd76a; font-weight: 700; }
 .np-key { font-weight: 600; }
 .np-waveform-wrap {
-  margin: 4px -4px 4px;
+  margin: 4px 0;
   cursor: pointer;
+  min-height: 60px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  overflow: hidden;
+  width: 100%;
 }
 .np-times {
   display: flex;
