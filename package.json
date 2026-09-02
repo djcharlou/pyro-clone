@@ -8,7 +8,13 @@
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:mac": "tauri build --target aarch64-apple-darwin",
+    "tauri:build:mac-intel": "tauri build --target x86_64-apple-darwin",
+    "tauri:build:win": "tauri build --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
     "browser-id3-writer": "^6.4.0",
@@ -19,6 +25,8 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

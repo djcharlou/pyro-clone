@@ -11,3 +11,7 @@ dist/
 data/
 *.sqlite
 *.sqlite-journal
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/

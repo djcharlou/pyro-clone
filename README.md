@@ -1,78 +1,109 @@
 # pyro-clone
 
-Local-file automix DJ — a Serato Pyro-like party-mode auto-DJ that runs **entirely in your browser**. Pick a folder of audio files, the app analyzes each track (BPM, key, energy, cue points), picks the next song with a configurable scoring engine, and crossfades automatically.
+Local-file auto-mix DJ + library workshop — inspired by Serato Pyro, MixedInKey, and Platinum Notes. Import your audio folder, let it analyze (BPM / key / energy / cue points), edit tags in bulk, dedupe, and let the party mode auto-pick + beat-match crossfade the whole night.
 
-**Pure web app — no install, no native code.** Works in Chrome/Edge/Safari/Firefox on desktop. Also runs in mobile browsers (with caveats — see below).
+**Runs three ways from the same codebase:** native Mac app (Tauri), Windows `.exe`, or plain web app (Chrome/Edge/Safari/Firefox, plus mobile as a PWA).
 
-## What's in this MVP (Phases 1-3)
+## Two modes
 
-- **Phase 1** — Dual-deck Web Audio player, folder import, manual crossfade
-- **Phase 2** — Offline analysis (BPM via autocorrelation, key via Krumhansl, energy via RMS, cue points from energy curve), persisted in IndexedDB
-- **Phase 3** — Auto-pick next track via scoring engine (BPM proximity / key compatibility / energy / variety / quality / recency), equal-power auto-crossfade triggered before mix-out cue
+- **Party** — Serato-Pyro-style stack view: NowPlaying with waveform + skip/play, ordered queue of upcoming tracks (drag-color cards), "MATCHING SONGS" suggestions from the scoring engine, save/load playlists, auto-mix toggle.
+- **Workshop** — MixedInKey-style dense table: sort/filter your whole library, inline-edit tags, multi-select + bulk edit, find duplicates (exact by hash, probable by title+artist±2s), write tags back to files.
 
-Phases 4-5 (beatmatching, time-stretch, phrase alignment, timeline editor) are not implemented yet.
+## Run — native (Mac / Windows)
+
+Recommended for the workshop features (writes tags directly to disk).
+
+```bash
+# One-time: install Rust toolchain
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install JS + Rust deps
+npm install
+
+# Dev (opens native window, hot reload)
+npm run tauri:dev
+
+# Build native binaries
+npm run tauri:build           # your current platform
+npm run tauri:build:mac       # Mac ARM64 (needs Xcode CLT)
+npm run tauri:build:mac-intel # Mac Intel — first: rustup target add x86_64-apple-darwin
+npm run tauri:build:win       # Windows (from Windows or WSL)
+```
+
+Output lands in `src-tauri/target/release/bundle/`:
+- Mac: `macos/pyro-clone.app` and `dmg/pyro-clone_x.y.z_aarch64.dmg`
+- Windows: `msi/pyro-clone_x.y.z_x64.msi`
+
+First launch on Mac: right-click → Open (bypasses unsigned-app Gatekeeper).
+
+## Run — web only
+
+```bash
+npm install
+npm run dev
+# open the printed http://localhost:5173
+```
+
+Also runs in GitHub Codespaces (`.devcontainer/` is preconfigured, Node 20, auto npm install, port 5173 auto-forwarded).
+
+## Browser support (web only)
+
+| Browser | Folder picker | File picker | Persisted file handles | Tag write-back |
+| --- | --- | --- | --- | --- |
+| Chrome / Edge desktop | ✅ | ✅ | ✅ | ✅ in-place |
+| Firefox / Safari desktop | ⚠️ `<input webkitdirectory>` | ✅ | ❌ per session | ⚠️ downloads copy |
+| iOS Safari (PWA) | ❌ | ✅ | ❌ | ⚠️ downloads copy |
+| Android Chrome (PWA) | ❌ | ✅ | ❌ | ⚠️ downloads copy |
+
+Native (Tauri) skips all of these limits — full disk access.
 
 ## Stack
 
 | Layer | Choice |
 | --- | --- |
 | UI | React 18 + TypeScript + Vite |
-| Audio | Web Audio API |
-| Analysis | Pure-JS DSP in a Web Worker (autocorrelation BPM, Krumhansl-Schmuckler key estimation) |
-| Library DB | IndexedDB (via `idb`) |
-| Tags | `music-metadata-browser` |
-| File access | File System Access API (Chrome/Edge desktop) + `<input webkitdirectory>` fallback |
-
-## Run locally
-
-```bash
-npm install
-npm run dev
-# open http://localhost:5173
-```
-
-## Run in GitHub Codespaces
-
-1. Open this repo in a Codespace
-2. In the terminal: `npm install && npm run dev`
-3. Codespaces auto-forwards port 5173 — click the URL it shows you ("Open in Browser")
-
-The dev server is configured with `host: true` so the forwarded port works out of the box.
-
-## Browser support
-
-| Browser | Folder picker | Files picker | Persisted file handles |
-| --- | --- | --- | --- |
-| Chrome / Edge desktop | ✅ (File System Access API) | ✅ | ✅ across reloads |
-| Firefox / Safari desktop | ⚠️ via `<input webkitdirectory>` | ✅ | ❌ re-pick each session |
-| iOS Safari | ❌ no folder pick | ✅ Files picker only | ❌ |
-| Android Chrome | ❌ no folder pick | ✅ Files picker | ❌ |
+| Desktop shell | Tauri 2 (Rust, ~5 MB binary) |
+| Audio playback | Web Audio API |
+| Analysis | Pure-JS DSP in a Web Worker (autocorrelation BPM, Krumhansl key, RMS energy, 512-bin waveform peaks) |
+| BPM sync | `playbackRate` on `AudioBufferSourceNode` (± 6 % safe range, downbeat-snapped fade start) |
+| Library DB | IndexedDB via `idb` |
+| Tag read | `music-metadata-browser` |
+| Tag write | `browser-id3-writer` (mp3 for now) |
 
 ## Project layout
 
 ```
 src/
-  audio/         Deck + AudioEngine (Web Audio crossfader)
-  analyzer/      AnalysisQueue + Worker + pure-JS DSP (BPM, key, energy, cues)
-  selector/      Scoring engine + Camelot helpers + pickNext
-  library/       File System Access API importer + file picker fallback
-  db/            IndexedDB store (idb wrapper)
-  components/    React UI (Library, DeckView, Transport, QueuePanel, Status)
-  shared/        Types shared across modules
+  audio/         Deck + AudioEngine (beatmatched crossfader)
+  analyzer/      Worker + pure-JS DSP (BPM, key, energy, cues, peaks)
+  selector/      Scoring engine + Camelot compatibility + pickNext
+  library/       Importer (FSA API + <input>), tagWriter, dedupe
+  db/            IndexedDB store + playlists persistence
+  components/    Party view (NowPlaying, Queue, Suggestions, AddSheet,
+                 PlaylistsSheet) + Workshop view (LibraryTable, BulkEdit,
+                 DuplicatesPanel)
+  shared/        Types shared across the codebase
   state/         zustand store
+src-tauri/       Rust shell — Cargo.toml, main.rs, tauri.conf.json,
+                 capabilities/, icons/
 ```
-
-## Known limitations
-
-- **BPM detection** uses pure-JS autocorrelation — ~±5 BPM on non-EDM tracks. Phase 4 will swap in `essentia.js` or `aubio-wasm` for accuracy.
-- **No time-stretch** — crossfade mixes without aligning beats. Phase 4 adds `soundtouch-js` in an AudioWorklet.
-- **Audio data is not persisted** — file handles are (on Chrome/Edge). On other browsers you re-pick the files each session.
-- **Mobile** works for one-off file picks but lacks library persistence + auto-play restrictions (first interaction required to start audio).
 
 ## Roadmap
 
 - [x] Phase 1: player + import + manual fade
 - [x] Phase 2: offline analysis + IndexedDB
 - [x] Phase 3: scoring + auto-queue + auto-crossfade
-- [ ] Phase 4: time-stretch + phase alignment + bass-swap / filter-fade / echo-out
-- [ ] Phase 5: timeline editor + beatgrid editor + waveform viz
+- [x] Phase 4 lite: BPM-matched crossfade via playbackRate
+- [x] Pyro-style UI: NowPlaying + waveform + editable queue + PWA
+- [x] Sprint A: Library workshop (bulk tag edit + dedupe + write-back)
+- [x] Tauri wrap: Mac ARM / Intel / Windows binaries
+- [ ] Sprint B: essentia/aubio BPM detector + 8 auto cue points + LUFS
+- [ ] Sprint D: MusicBrainz + Chromaprint enrichment
+- [ ] Sprint C: bulk file rename + reorganize + undo
+- [ ] Phase 4 full: SoundTouch time-stretch in AudioWorklet
+
+## Known limitations
+
+- **BPM detection** uses pure-JS autocorrelation — ~±5 BPM on non-EDM tracks. Sprint B swaps this out.
+- **Tag write-back is mp3-only** currently (flac/m4a need separate libs). Native Tauri build can grow this via a Rust `taglib` binding later.
+- **BPM sync pitches the audio** — proper time-stretch is deferred.

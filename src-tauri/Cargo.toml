@@ -1,0 +1,29 @@
+[package]
+name = "pyro-clone"
+version = "0.3.0"
+description = "Local-file automix DJ engine (Serato Pyro-like) — Tauri native shell"
+authors = ["djcharlou"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "pyro_clone_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
