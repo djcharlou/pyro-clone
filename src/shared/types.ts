@@ -32,6 +32,21 @@ export interface EnergyProfile {
   replayGainDb?: number;
 }
 
+export interface LoudnessInfo {
+  integratedLufs: number;   // ITU-R BS.1770-4, in LUFS
+  suggestedGainDb: number;  // dB to apply to reach targetLufs
+  targetLufs: number;       // reference target used for suggestion
+}
+
+export type CueType = 'intro' | 'outro' | 'drop' | 'break' | 'phrase';
+
+export interface AutoCue {
+  timeSec: number;
+  type: CueType;
+  score: number; // 0..1, higher = more significant
+  label?: string;
+}
+
 export interface CuePoints {
   introStart: number;
   introEnd: number;
@@ -78,6 +93,8 @@ export interface TrackAnalysis {
   energy: EnergyProfile;
   cues: CuePoints;
   waveform?: WaveformPeaks;
+  loudness?: LoudnessInfo;
+  autoCues?: AutoCue[];
 }
 
 export interface AnalyzedTrack extends Track {

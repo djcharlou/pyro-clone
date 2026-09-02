@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AnalyzedTrack } from '@shared/types';
 
 interface Props {
@@ -10,7 +10,9 @@ interface Props {
   onAddMany(ids: string[]): void;
   onImportFolder(): void;
   onImportFiles(): void;
+  onImportITunes?: () => void;
   supportsDirectoryPicker: boolean;
+  supportsITunes?: boolean;
 }
 
 export function AddSheet({
@@ -22,9 +24,17 @@ export function AddSheet({
   onAddMany,
   onImportFolder,
   onImportFiles,
+  onImportITunes,
   supportsDirectoryPicker,
+  supportsITunes,
 }: Props): JSX.Element | null {
   const [filter, setFilter] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Reset selection whenever the sheet reopens
+  useEffect(() => {
+    if (open) setSelected(new Set());
+  }, [open]);
 
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -39,15 +49,35 @@ export function AddSheet({
 
   if (!open) return null;
 
+  function toggleOne(id: string): void {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllVisible(): void {
+    setSelected(new Set(filtered.filter((t) => !queueIds.has(t.id)).map((t) => t.id)));
+  }
+
+  function commitSelected(): void {
+    if (selected.size === 0) return;
+    onAddMany([...selected]);
+    setSelected(new Set());
+  }
+
+  const hasSelection = selected.size > 0;
+  const addableVisible = filtered.filter((t) => !queueIds.has(t.id)).length;
+
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-handle" />
         <div className="sheet-head">
           <h2>Add tracks</h2>
-          <button className="sheet-close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <button className="sheet-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="sheet-import-row">
@@ -57,14 +87,11 @@ export function AddSheet({
             </button>
           )}
           <button className="sheet-import-btn" onClick={onImportFiles}>
-            🎵 Pick files
+            🎵 Pick files (multi ok)
           </button>
-          {tracks.length > 0 && (
-            <button
-              className="sheet-import-btn sheet-import-btn--ghost"
-              onClick={() => onAddMany(filtered.map((t) => t.id))}
-            >
-              Add all shown ({filtered.length})
+          {supportsITunes && onImportITunes && (
+            <button className="sheet-import-btn" onClick={onImportITunes} title="Read your Music.app / iTunes library XML">
+              🍎 Import from Music.app
             </button>
           )}
         </div>
@@ -77,6 +104,27 @@ export function AddSheet({
           onChange={(e) => setFilter(e.target.value)}
         />
 
+        {tracks.length > 0 && (
+          <div className="sheet-multi-bar">
+            <button
+              className="sheet-multi-btn"
+              onClick={selectAllVisible}
+              disabled={addableVisible === 0}
+            >
+              Select all ({addableVisible})
+            </button>
+            {hasSelection && (
+              <button
+                className="sheet-multi-btn"
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </button>
+            )}
+            <span className="sheet-multi-count">{selected.size} selected</span>
+          </div>
+        )}
+
         <div className="sheet-list">
           {tracks.length === 0 && (
             <div className="sheet-empty">
@@ -88,26 +136,51 @@ export function AddSheet({
           )}
           {filtered.map((t) => {
             const queued = queueIds.has(t.id);
+            const isSelected = selected.has(t.id);
             return (
-              <button
+              <div
                 key={t.id}
-                className={`sheet-row ${queued ? 'sheet-row--queued' : ''}`}
-                onClick={() => onAdd(t.id)}
-                disabled={queued}
+                className={`sheet-row ${queued ? 'sheet-row--queued' : ''} ${isSelected ? 'sheet-row--selected' : ''}`}
               >
-                <div className="sheet-row-text">
-                  <div className="sheet-row-title">{t.title}</div>
-                  <div className="sheet-row-artist">{t.artist}</div>
-                </div>
-                <div className="sheet-row-meta">
-                  <span>{t.analysis?.beatGrid.bpm.toFixed(0) ?? '—'}</span>
-                  <span>{t.analysis?.key.camelot ?? '—'}</span>
-                  <span className="sheet-row-add">{queued ? '✓' : '+'}</span>
-                </div>
-              </button>
+                <label className="sheet-row-check">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    disabled={queued}
+                    onChange={() => toggleOne(t.id)}
+                  />
+                </label>
+                <button
+                  className="sheet-row-body"
+                  onClick={() => {
+                    if (queued) return;
+                    if (hasSelection) toggleOne(t.id);
+                    else onAdd(t.id);
+                  }}
+                  disabled={queued}
+                >
+                  <div className="sheet-row-text">
+                    <div className="sheet-row-title">{t.title}</div>
+                    <div className="sheet-row-artist">{t.artist}</div>
+                  </div>
+                  <div className="sheet-row-meta">
+                    <span>{t.analysis?.beatGrid.bpm.toFixed(0) ?? '—'}</span>
+                    <span>{t.analysis?.key.camelot ?? '—'}</span>
+                    <span className="sheet-row-add">{queued ? '✓' : (isSelected ? '☒' : '+')}</span>
+                  </div>
+                </button>
+              </div>
             );
           })}
         </div>
+
+        {hasSelection && (
+          <div className="sheet-commit-bar">
+            <button className="sheet-commit-btn" onClick={commitSelected}>
+              Add {selected.size} to queue
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

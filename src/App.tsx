@@ -15,6 +15,8 @@ import { Suggestions } from './components/Suggestions';
 import { AddSheet } from './components/AddSheet';
 import { PlaylistsSheet } from './components/PlaylistsSheet';
 import { WorkshopView } from './components/WorkshopView';
+import { HUD } from './components/HUD';
+import { smartReorderQueue } from './selector/smartReorder';
 import { store } from './db/IndexedDBStore';
 import {
   importFiles,
@@ -23,6 +25,7 @@ import {
   supportsDirectoryPicker,
   type ImportProgress,
 } from './library/Importer';
+import { importFromITunes, isTauri } from './library/itunes';
 
 export function App(): JSX.Element {
   const [, forceUpdate] = useState(0);
@@ -53,6 +56,10 @@ export function App(): JSX.Element {
   const openSheet = useStore((s) => s.openSheet);
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
+  const analyzingIds = useStore((s) => s.analyzingIds);
+  const analysisTotal = useStore((s) => s.analysisTotal);
+  const setAnalysisTotal = useStore((s) => s.setAnalysisTotal);
+  const incrementAnalysisTotal = useStore((s) => s.incrementAnalysisTotal);
 
   const engineRef = useRef<AudioEngine | null>(null);
   const queueRef = useRef<AnalysisQueue | null>(null);
@@ -144,6 +151,20 @@ export function App(): JSX.Element {
     currentTrack?.analysis?.beatGrid.bpm !== undefined
       ? currentTrack.analysis.beatGrid.bpm * stretchRatio
       : null;
+
+  const autoMixNextInSec: number | null = useMemo(() => {
+    if (!autoMix || !currentTrack || !playing) return null;
+    const bpmA = currentTrack.analysis?.beatGrid.bpm ?? 120;
+    const fadeBeats = 32;
+    const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
+    const mixOut = currentTrack.analysis?.cues.mixOutPoint ?? Math.max(0, durationSec - 16);
+    return Math.max(0, mixOut - fadeDur - positionSec);
+  }, [autoMix, currentTrack, playing, positionSec, durationSec]);
+
+  const analyzedCount = useMemo(
+    () => tracks.filter((t) => t.analysis).length,
+    [tracks]
+  );
 
   // Suggestions: top-ranked matches for the LAST track in queue (or currently
   // playing if queue empty), excluding tracks already in queue + current.
@@ -317,6 +338,8 @@ export function App(): JSX.Element {
     const aq = queueRef.current;
     if (!aq) return;
     const todo = all.filter((t) => !t.analysis && fileRegistry.has(t.id));
+    if (todo.length === 0) return;
+    incrementAnalysisTotal(todo.length);
     for (const t of todo) {
       try {
         const analysis = await aq.enqueue(t);
@@ -324,6 +347,8 @@ export function App(): JSX.Element {
         upsertAnalysis(t.id, { analysis });
       } catch (err) {
         console.error('[analyze]', t.title, err);
+      } finally {
+        incrementAnalysisTotal(-1);
       }
     }
   }
@@ -414,6 +439,13 @@ export function App(): JSX.Element {
     setPlaylists(list);
   }
 
+  function handleSmartReorder(): void {
+    if (queue.length <= 1) return;
+    const anchor = currentTrack;
+    const reordered = smartReorderQueue(queueTracks, anchor, session);
+    setQueue(reordered.map((t) => t.id));
+  }
+
   return (
     <div className={`app app--${view}`}>
       <header className="app-header">
@@ -457,6 +489,15 @@ export function App(): JSX.Element {
 
       {view === 'party' ? (
         <>
+          <HUD
+            analyzingCount={analyzingIds.size}
+            totalTracks={tracks.length}
+            analyzedCount={analyzedCount}
+            autoMixOn={autoMix}
+            autoMixNextInSec={autoMixNextInSec}
+            queueLength={queue.length}
+          />
+
           <NowPlaying
             track={currentTrack}
             playing={playing}
@@ -470,6 +511,18 @@ export function App(): JSX.Element {
           />
 
           <main className="main">
+            {queue.length > 1 && (
+              <div className="queue-toolbar">
+                <button
+                  className="queue-tool-btn"
+                  onClick={handleSmartReorder}
+                  title="Reorder the queue for best transitions"
+                >
+                  🎯 Smart reorder
+                </button>
+                <span className="queue-tool-count">{queue.length} in queue</span>
+              </div>
+            )}
             <QueueList
               queueTracks={queueTracks}
               onRemove={removeFromQueue}

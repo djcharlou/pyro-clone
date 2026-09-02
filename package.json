@@ -17,9 +17,11 @@
     "tauri:build:win": "tauri build --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
+    "@tauri-apps/plugin-fs": "^2.5.2",
     "browser-id3-writer": "^6.4.0",
     "idb": "^8.0.0",
     "music-metadata-browser": "^2.5.10",
+    "plist": "^5.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
@@ -27,6 +29,7 @@
   "devDependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/cli": "^2.11.4",
+    "@types/plist": "^3.0.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

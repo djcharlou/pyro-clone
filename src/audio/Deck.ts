@@ -77,6 +77,15 @@ export class Deck {
     this.buffer = decoded;
     this.track = track;
     this.stretchRatio = 1;
+    // LUFS-driven output gain so tracks sound consistent across the mix.
+    // Clamp to ±6dB so a badly-mastered outlier can't blow ears out.
+    const suggested = track.analysis?.loudness?.suggestedGainDb;
+    if (suggested !== undefined && Number.isFinite(suggested)) {
+      const clamped = Math.max(-6, Math.min(6, suggested));
+      this.output.gain.value = Math.pow(10, clamped / 20);
+    } else {
+      this.output.gain.value = 1;
+    }
     this.listeners.onLoad?.(track);
   }
 

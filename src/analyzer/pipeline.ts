@@ -20,6 +20,7 @@ import {
   rms,
 } from './dsp';
 import { estimateKey } from './key';
+import { computeIntegratedLufs } from './loudness';
 
 const ANALYSIS_RATE = 22050;
 const ENV_WINDOW = 256; // ~11ms @ 22050Hz
@@ -68,6 +69,10 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   // Waveform peaks (~512 bins of max abs sample per window)
   const waveform = computeWaveformPeaks(downsampled, 512);
 
+  // LUFS integrated loudness (ITU-R BS.1770-4) on the ORIGINAL channels
+  // so the stereo image + full bandwidth are preserved for the meter.
+  const loudness = computeIntegratedLufs(input.channels, input.sampleRate);
+
   const quality = scoreQuality(bpmConfidence, isStable, key.confidence);
 
   return {
@@ -80,6 +85,7 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     energy,
     cues,
     waveform,
+    loudness,
   };
 }
 

@@ -21,22 +21,35 @@ export interface ImportSummary {
 }
 
 /**
- * In-memory map from track id -> File (or FileSystemFileHandle).
- * The audio data isn't persisted in IndexedDB (would balloon DB size);
- * instead we keep file handles in-memory for the session. On reload,
- * the user re-picks the folder (we try to restore handles where supported).
+ * In-memory map from track id -> File-source.
+ * Three shapes are supported:
+ *   - a `File`                         (from <input type="file">)
+ *   - a `FileSystemFileHandle`         (Chromium's showDirectoryPicker)
+ *   - a Tauri absolute path            (native runtime, e.g. iTunes import)
+ *
+ * The audio bytes are never persisted in IDB (would balloon storage).
+ * File handles are persisted where the browser allows; Tauri paths are
+ * kept in memory only, but re-obtainable on next launch by re-scanning
+ * the iTunes library.
  */
+interface TauriPath { kind: 'tauri-path'; path: string }
+type FileSource = File | FileSystemFileHandle | TauriPath;
+
 class FileRegistry {
-  private byTrackId = new Map<string, File | FileSystemFileHandle>();
+  private byTrackId = new Map<string, FileSource>();
 
   put(trackId: string, item: File | FileSystemFileHandle): void {
     this.byTrackId.set(trackId, item);
   }
 
+  putTauriPath(trackId: string, path: string): void {
+    this.byTrackId.set(trackId, { kind: 'tauri-path', path });
+  }
+
   async getFile(trackId: string): Promise<File | null> {
     const item = this.byTrackId.get(trackId);
     if (!item) {
-      // Try to restore from IndexedDB-persisted handle
+      // Try to restore from IndexedDB-persisted handle (browser flow)
       const handle = await store.getFileHandle(trackId);
       if (!handle) return null;
       const permission = await ensureReadPermission(handle);
@@ -44,6 +57,9 @@ class FileRegistry {
       const file = await handle.getFile();
       this.byTrackId.set(trackId, file);
       return file;
+    }
+    if (isTauriPath(item)) {
+      return await tauriPathToFile(item.path);
     }
     if ('getFile' in item && typeof item.getFile === 'function') {
       const file = await item.getFile();
@@ -55,6 +71,40 @@ class FileRegistry {
 
   has(trackId: string): boolean {
     return this.byTrackId.has(trackId);
+  }
+}
+
+function isTauriPath(x: FileSource): x is TauriPath {
+  return typeof x === 'object' && x !== null && 'kind' in x && (x as TauriPath).kind === 'tauri-path';
+}
+
+async function tauriPathToFile(path: string): Promise<File | null> {
+  try {
+    const fs = await import('@tauri-apps/plugin-fs');
+    const bytes = await fs.readFile(path);
+    const name = path.split('/').pop() ?? 'audio';
+    const mime = guessMime(name);
+    // Uint8Array is a valid BlobPart
+    return new File([bytes], name, { type: mime });
+  } catch (err) {
+    console.warn('[fileRegistry] tauri readFile failed for', path, err);
+    return null;
+  }
+}
+
+function guessMime(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'mp3': return 'audio/mpeg';
+    case 'wav': return 'audio/wav';
+    case 'flac': return 'audio/flac';
+    case 'm4a':
+    case 'aac': return 'audio/mp4';
+    case 'ogg': return 'audio/ogg';
+    case 'opus': return 'audio/opus';
+    case 'aiff':
+    case 'aif': return 'audio/aiff';
+    default: return 'application/octet-stream';
   }
 }
 

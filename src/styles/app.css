@@ -124,6 +124,147 @@ input[type="text"] {
   justify-content: center;
 }
 
+/* === HUD (top status strip) =============================================== */
+
+.hud {
+  display: flex;
+  gap: 8px;
+  padding: 6px 14px 4px;
+  overflow-x: auto;
+}
+.hud-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 5px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.95);
+  white-space: nowrap;
+}
+.hud-label {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+}
+.hud-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.hud-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+}
+.hud-dot--on { background: #7fff9d; box-shadow: 0 0 8px rgba(127, 255, 157, 0.7); }
+.hud-dot--pulse { animation: pulseDot 1.2s ease-in-out infinite; }
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.55; }
+}
+
+/* === QUEUE TOOLBAR ======================================================== */
+
+.queue-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 4px 10px;
+}
+.queue-tool-btn {
+  background: rgba(0, 0, 0, 0.32);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.queue-tool-btn:hover { background: rgba(0, 0, 0, 0.5); }
+.queue-tool-count {
+  font-size: 10px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+
+/* === ADD SHEET multi-select =============================================== */
+
+.sheet-multi-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 18px 8px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.sheet-multi-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: none;
+  font-size: 11px;
+  cursor: pointer;
+}
+.sheet-multi-btn:hover { background: rgba(255, 255, 255, 0.15); }
+.sheet-multi-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.sheet-multi-count {
+  margin-left: auto;
+  font-weight: 600;
+  color: #fff;
+}
+.sheet-row {
+  display: grid !important;
+  grid-template-columns: auto 1fr !important;
+  padding: 0 !important;
+  background: rgba(255, 255, 255, 0.05);
+}
+.sheet-row--selected { background: rgba(127, 255, 157, 0.15) !important; }
+.sheet-row--selected .sheet-row-add { background: #7fff9d !important; color: #14161c !important; }
+.sheet-row-check {
+  padding: 12px 4px 12px 14px;
+  display: flex;
+  align-items: center;
+}
+.sheet-row-check input { accent-color: #7fff9d; }
+.sheet-row-body {
+  background: transparent;
+  border: none;
+  padding: 10px 14px 10px 6px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+.sheet-commit-bar {
+  padding: 8px 18px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sheet-commit-btn {
+  width: 100%;
+  padding: 12px;
+  background: #7fff9d;
+  color: #14161c;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sheet-commit-btn:hover { background: #a5ffb8; }
+
 /* === NOW PLAYING ========================================================== */
 
 .now-playing {

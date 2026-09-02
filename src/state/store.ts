@@ -50,6 +50,12 @@ interface AppState {
   analyzingIds: Set<string>;
   markAnalyzing(id: string, on: boolean): void;
 
+  // Total pending analysis (for HUD progress bar). Distinct from analyzingIds:
+  // total is set when a batch enqueues, decremented when each finishes.
+  analysisTotal: number;
+  setAnalysisTotal(n: number): void;
+  incrementAnalysisTotal(delta: number): void;
+
   // Queue: ordered list of track IDs to play next (after current)
   queue: string[];
   setQueue(ids: string[]): void;
@@ -133,6 +139,11 @@ export const useStore = create<AppState>((set) => ({
       else next.delete(id);
       return { analyzingIds: next };
     }),
+
+  analysisTotal: 0,
+  setAnalysisTotal: (n) => set({ analysisTotal: n }),
+  incrementAnalysisTotal: (delta) =>
+    set((s) => ({ analysisTotal: Math.max(0, s.analysisTotal + delta) })),
 
   queue: [],
   setQueue: (ids) => set({ queue: ids }),
