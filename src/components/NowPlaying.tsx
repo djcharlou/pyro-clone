@@ -46,8 +46,12 @@ export function NowPlaying({
   autoMixInSec = null,
   autoMixOn = false,
 }: Props): JSX.Element {
-  const progress = durationSec > 0 ? positionSec / durationSec : 0;
-  const nextProgress = nextDurationSec > 0 ? nextPositionSec / nextDurationSec : 0;
+  const progress = durationSec > 0 && Number.isFinite(positionSec)
+    ? Math.max(0, Math.min(1, positionSec / durationSec))
+    : 0;
+  const nextProgress = nextDurationSec > 0 && Number.isFinite(nextPositionSec)
+    ? Math.max(0, Math.min(1, nextPositionSec / nextDurationSec))
+    : 0;
   const inMix = !!nextTrack && nextIsPlaying;
 
   const coverUrl = track?.coverArtDataUrl;

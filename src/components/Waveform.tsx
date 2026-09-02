@@ -7,15 +7,9 @@ interface Props {
   height?: number;
   barWidth?: number;
   barGap?: number;
-  /** Color before the playhead */
   playedColor?: string;
-  /** Color after the playhead */
   remainingColor?: string;
-  /**
-   * Called with a 0..1 fraction ONCE, when the user releases the pointer.
-   * During the drag the playhead line moves smoothly but no audio seek
-   * fires, so playback keeps going uninterrupted until commit.
-   */
+  /** Fires ONCE on pointer release with the final 0..1 fraction. */
   onScrub?: (fraction: number) => void;
 }
 
@@ -34,8 +28,22 @@ export function Waveform({
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
   const [dragFrac, setDragFrac] = useState<number | null>(null);
   const draggingRef = useRef(false);
+  // Trigger a redraw whenever the container is resized (layout swaps
+  // during deck transitions can leave the canvas at zero width otherwise).
+  const [resizeTick, setResizeTick] = useState(0);
 
-  const displayProgress = dragFrac ?? progress;
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setResizeTick((n) => n + 1));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // NaN-safe display progress (durationSec can briefly be 0 during a swap).
+  const rawDisplay = dragFrac ?? progress;
+  const displayProgress =
+    Number.isFinite(rawDisplay) ? Math.max(0, Math.min(1, rawDisplay)) : 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -43,15 +51,15 @@ export function Waveform({
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    if (w === 0) return;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+    if (w === 0 || h === 0) return;
+    if (canvas.width !== w * dpr) canvas.width = w * dpr;
+    if (canvas.height !== h * dpr) canvas.height = h * dpr;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const p = Math.max(0, Math.min(1, displayProgress));
+    const p = displayProgress;
 
     if (!peaks || peaks.values.length === 0) {
       const mid = h / 2;
@@ -59,7 +67,7 @@ export function Waveform({
       ctx.fillStyle = remainingColor;
       ctx.fillRect(0, mid - barH / 2, w, barH);
       ctx.fillStyle = playedColor;
-      ctx.fillRect(0, mid - barH / 2, w * p, barH);
+      ctx.fillRect(0, mid - barH / 2, Math.max(0, w * p), barH);
     } else {
       const step = barWidth + barGap;
       const bars = Math.floor(w / step);
@@ -74,11 +82,8 @@ export function Waveform({
       }
     }
 
-    // Playhead line (thicker + a scrub highlight when dragging)
     const px = Math.round(w * p);
     if (dragFrac !== null) {
-      // Amber highlight while scrubbing so it's obvious this isn't the
-      // real playback position yet.
       ctx.fillStyle = '#ffd76a';
       ctx.fillRect(px - 2, 0, 4, h);
     } else {
@@ -86,7 +91,6 @@ export function Waveform({
       ctx.fillRect(px - 1, 0, 2, h);
     }
 
-    // Hover indicator (only when NOT dragging — dragFrac takes over)
     if (dragFrac === null && hoverFrac !== null && onScrub) {
       const hx = Math.round(w * hoverFrac);
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
@@ -100,14 +104,17 @@ export function Waveform({
     playedColor,
     remainingColor,
     hoverFrac,
-    onScrub,
     dragFrac,
+    onScrub,
+    resizeTick,
+    height,
   ]);
 
   function fractionFromEvent(e: { clientX: number }): number {
     const el = wrapRef.current;
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
+    if (rect.width === 0) return 0;
     return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   }
 
@@ -144,18 +151,14 @@ export function Waveform({
           const finalFrac = dragFrac ?? fractionFromEvent(e);
           draggingRef.current = false;
           setDragFrac(null);
-          // Commit only once, at release — no audio interruption during drag.
           onScrub(finalFrac);
         }
       }}
       onPointerCancel={() => {
-        // Aborted drag — don't seek, just clear scrub state.
         draggingRef.current = false;
         setDragFrac(null);
       }}
-      onPointerLeave={() => {
-        setHoverFrac(null);
-      }}
+      onPointerLeave={() => setHoverFrac(null)}
     >
       <canvas
         ref={canvasRef}
