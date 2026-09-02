@@ -30,6 +30,7 @@ import {
 } from './library/Importer';
 import { importFromITunes, isTauri } from './library/itunes';
 import { pickAudioFilesNative, pickFolderNative } from './library/tauriImport';
+import { effectiveMixInPoint, effectiveMixOutPoint } from './library/cues';
 
 export function App(): JSX.Element {
   const [, forceUpdate] = useState(0);
@@ -176,7 +177,7 @@ export function App(): JSX.Element {
     const bpmA = currentTrack.analysis?.beatGrid.bpm ?? 120;
     const fadeBeats = 32;
     const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
-    const mixOut = currentTrack.analysis?.cues.mixOutPoint ?? Math.max(0, durationSec - 16);
+    const mixOut = effectiveMixOutPoint(currentTrack, 16);
     return Math.max(0, mixOut - fadeDur - positionSec);
   }, [autoMix, currentTrack, playing, positionSec, durationSec]);
 
@@ -328,7 +329,7 @@ export function App(): JSX.Element {
         if (active.track?.id !== first.id) {
           await loadTrackIntoActive(first);
         }
-        engine.playActive(first.analysis?.cues.mixInPoint ?? 0);
+        engine.playActive(effectiveMixInPoint(first));
         // Mark it as played immediately so nothing picks it again.
         pushHistory(first.id);
       } finally {
@@ -343,7 +344,7 @@ export function App(): JSX.Element {
 
     const pos = active.positionSec();
     const dur = active.duration;
-    const mixOut = active.track.analysis?.cues.mixOutPoint ?? Math.max(0, dur - 16);
+    const mixOut = effectiveMixOutPoint(active.track, 16);
     const triggerAt = mixOut - fadeDur - 0.7;
     if (pos < triggerAt) return;
 
@@ -354,7 +355,7 @@ export function App(): JSX.Element {
       return;
     }
     if (inactive.isPlaying) return;
-    const offset = inactive.track.analysis?.cues.mixInPoint ?? 0;
+    const offset = effectiveMixInPoint(inactive.track);
     engine.crossfade({ durationBeats: fadeBeats, deckBStartOffset: offset });
     // Pop from queue if the loaded inactive matches the head
     /* Queue is a playlist — do NOT pop it. History tracks what already
@@ -529,7 +530,7 @@ export function App(): JSX.Element {
       void (async () => {
         const first = queueTracks[0];
         await loadTrackIntoActive(first);
-        engine.playActive(first.analysis?.cues.mixInPoint ?? 0);
+        engine.playActive(effectiveMixInPoint(first));
       })();
     }
     forceUpdate((x) => x + 1);
@@ -543,10 +544,50 @@ export function App(): JSX.Element {
       await loadNextIntoInactive();
     }
     if (engine.getInactive().track) {
-      const offset = engine.getInactive().track!.analysis?.cues.mixInPoint ?? 0;
+      const offset = effectiveMixInPoint(engine.getInactive().track!);
       // 8-beat quick beat-matched fade for manual skip
       engine.crossfade({ durationBeats: 8, minDurationSec: 2, deckBStartOffset: offset });
       /* No popQueue — playlist stays put, history advances via onTransitionEnd */
+    }
+  }
+
+  /** Smooth 32-beat beatmatched crossfade to the next queued (or picked) track. */
+  async function handleMixNow(): Promise<void> {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const inactive = engine.getInactive();
+    if (!inactive.track) {
+      await loadNextIntoInactive();
+    }
+    const nextDeck = engine.getInactive();
+    if (nextDeck.track) {
+      const offset = effectiveMixInPoint(nextDeck.track);
+      engine.crossfade({ durationBeats: 32, deckBStartOffset: offset });
+    }
+  }
+
+  /** Bypass the queue — pick the current top match from the selector and
+   *  smooth-mix straight into it. */
+  async function handleNextRecommended(): Promise<void> {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const active = engine.getActive();
+    if (!active.track) return;
+    const activeId = active.track.id;
+    const pool = tracks.filter(
+      (t) => t.analysis && fileRegistry.has(t.id) && t.id !== activeId &&
+              !session.history.includes(t.id)
+    );
+    if (pool.length === 0) return;
+    const report = pickNext({ pool, current: active.track, session });
+    setLastPick(report.picked);
+    // Insert at head of the queue so the visible playlist reflects the pick
+    setQueue([report.picked.track.id, ...queue.filter((id) => id !== report.picked.track.id)]);
+    await loadTrackIntoInactive(report.picked.track);
+    const nextDeck = engine.getInactive();
+    if (nextDeck.track) {
+      const offset = effectiveMixInPoint(nextDeck.track);
+      engine.crossfade({ durationBeats: 32, deckBStartOffset: offset });
     }
   }
 
@@ -565,7 +606,7 @@ export function App(): JSX.Element {
     const engine = engineRef.current;
     if (!engine) return;
     await loadTrackIntoActive(track);
-    engine.playActive(track.analysis?.cues.mixInPoint ?? 0);
+    engine.playActive(effectiveMixInPoint(track));
     pushHistory(id);
     /* Keep the entry in the playlist — history advancement is enough
      * for the auto-mix to skip it next round. */
@@ -724,6 +765,8 @@ export function App(): JSX.Element {
             stretchRatio={stretchRatio}
             onPlayPause={handlePlayPause}
             onSkip={() => void handleSkip()}
+            onMixNow={() => void handleMixNow()}
+            onNextRecommended={() => void handleNextRecommended()}
             onSeekFraction={handleSeek}
             nextTrack={
               engineRef.current?.getInactive().track

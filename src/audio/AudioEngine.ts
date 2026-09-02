@@ -23,7 +23,10 @@ export class AudioEngine {
     this.listeners = listeners;
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.85;
+    // Equal-power crossfade sums both decks at ~0.7 mid-fade; if each is
+    // near unity and content is peak-normalized, the sum can hit 1.4.
+    // A conservative master keeps headroom for that + fills of stacked EQs.
+    this.master.gain.value = 0.72;
     this.master.connect(this.ctx.destination);
 
     const notify = (): void => this.listeners.onDeckUpdate?.();

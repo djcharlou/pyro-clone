@@ -77,12 +77,13 @@ export class Deck {
     this.buffer = decoded;
     this.track = track;
     this.stretchRatio = 1;
-    // LUFS-driven output gain so tracks sound consistent across the mix.
-    // Clamp to ±6dB so a badly-mastered outlier can't blow ears out.
+    // LUFS-driven output gain — only ATTENUATE loud tracks toward target.
+    // Never boost (positive dB would clip during the crossfade sum since
+    // both decks briefly sit at ~0.7 gain).
     const suggested = track.analysis?.loudness?.suggestedGainDb;
     if (suggested !== undefined && Number.isFinite(suggested)) {
-      const clamped = Math.max(-6, Math.min(6, suggested));
-      this.output.gain.value = Math.pow(10, clamped / 20);
+      const cutOnly = Math.max(-12, Math.min(0, suggested));
+      this.output.gain.value = Math.pow(10, cutOnly / 20);
     } else {
       this.output.gain.value = 1;
     }

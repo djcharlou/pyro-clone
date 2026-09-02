@@ -555,6 +555,33 @@ input[type="text"] {
   font-size: 10px;
 }
 .np-waveform-wrap--next { margin-top: 4px; }
+.np-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.np-action-btn {
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.08s;
+}
+.np-action-btn:hover:not(:disabled) { background: rgba(0, 0, 0, 0.55); }
+.np-action-btn:active:not(:disabled) { transform: scale(0.96); }
+.np-action-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.np-action-btn--primary {
+  background: #fff;
+  color: var(--bg-top);
+}
+.np-action-btn--primary:hover:not(:disabled) { background: rgba(255,255,255,0.85); }
 .np-transport {
   display: flex;
   justify-content: center;

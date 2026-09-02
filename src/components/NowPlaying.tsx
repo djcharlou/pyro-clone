@@ -10,6 +10,8 @@ interface Props {
   stretchRatio: number;
   onPlayPause(): void;
   onSkip(): void;
+  onMixNow?(): void;
+  onNextRecommended?(): void;
   onSeekFraction(x: number): void;
 
   /** Second deck info — shown ONLY when it is currently playing (mid-mix). */
@@ -33,6 +35,8 @@ export function NowPlaying({
   stretchRatio,
   onPlayPause,
   onSkip,
+  onMixNow,
+  onNextRecommended,
   onSeekFraction,
   nextTrack,
   nextPositionSec = 0,
@@ -150,13 +154,38 @@ export function NowPlaying({
         <button
           className="np-btn np-btn--primary"
           onClick={onSkip}
-          disabled={!nextTrack && !track}
+          disabled={!track}
           aria-label="Skip to next"
-          title="Beat-matched fade to next track"
+          title="Quick beat-matched fade to next (8 beats)"
         >
           {NextIcon}
         </button>
       </div>
+
+      {(onMixNow || onNextRecommended) && (
+        <div className="np-actions">
+          {onMixNow && (
+            <button
+              className="np-action-btn np-action-btn--primary"
+              onClick={onMixNow}
+              disabled={!track || inMix}
+              title="Smooth 32-beat beat-matched crossfade to the next track"
+            >
+              🎚️ Mix now
+            </button>
+          )}
+          {onNextRecommended && (
+            <button
+              className="np-action-btn"
+              onClick={onNextRecommended}
+              disabled={!track || inMix}
+              title="Ignore queue — pick the best match from the library and mix"
+            >
+              ✨ Next best match
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

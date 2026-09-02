@@ -11,7 +11,11 @@ interface Props {
   playedColor?: string;
   /** Color after the playhead */
   remainingColor?: string;
-  /** Called with a 0..1 fraction while the user drags/clicks the wave. */
+  /**
+   * Called with a 0..1 fraction ONCE, when the user releases the pointer.
+   * During the drag the playhead line moves smoothly but no audio seek
+   * fires, so playback keeps going uninterrupted until commit.
+   */
   onScrub?: (fraction: number) => void;
 }
 
@@ -28,7 +32,10 @@ export function Waveform({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [dragFrac, setDragFrac] = useState<number | null>(null);
+  const draggingRef = useRef(false);
+
+  const displayProgress = dragFrac ?? progress;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -44,11 +51,9 @@ export function Waveform({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
-    const p = Math.max(0, Math.min(1, progress));
+    const p = Math.max(0, Math.min(1, displayProgress));
 
     if (!peaks || peaks.values.length === 0) {
-      // Fallback: a full-height progress bar so the user still sees
-      // the playhead when analysis hasn't produced peaks yet.
       const mid = h / 2;
       const barH = h * 0.6;
       ctx.fillStyle = remainingColor;
@@ -69,18 +74,35 @@ export function Waveform({
       }
     }
 
-    // Playhead line
+    // Playhead line (thicker + a scrub highlight when dragging)
     const px = Math.round(w * p);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(px - 1, 0, 2, h);
+    if (dragFrac !== null) {
+      // Amber highlight while scrubbing so it's obvious this isn't the
+      // real playback position yet.
+      ctx.fillStyle = '#ffd76a';
+      ctx.fillRect(px - 2, 0, 4, h);
+    } else {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px - 1, 0, 2, h);
+    }
 
-    // Hover indicator
-    if (hoverFrac !== null && onScrub) {
+    // Hover indicator (only when NOT dragging — dragFrac takes over)
+    if (dragFrac === null && hoverFrac !== null && onScrub) {
       const hx = Math.round(w * hoverFrac);
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.fillRect(hx - 1, 0, 2, h);
     }
-  }, [peaks, progress, barWidth, barGap, playedColor, remainingColor, hoverFrac, onScrub]);
+  }, [
+    peaks,
+    displayProgress,
+    barWidth,
+    barGap,
+    playedColor,
+    remainingColor,
+    hoverFrac,
+    onScrub,
+    dragFrac,
+  ]);
 
   function fractionFromEvent(e: { clientX: number }): number {
     const el = wrapRef.current;
@@ -93,27 +115,46 @@ export function Waveform({
     <div
       ref={wrapRef}
       className="waveform-wrap"
-      style={{ width: '100%', height, cursor: onScrub ? 'ew-resize' : 'default' }}
+      style={{
+        width: '100%',
+        height,
+        cursor: onScrub ? (dragFrac !== null ? 'grabbing' : 'ew-resize') : 'default',
+        touchAction: 'none',
+      }}
       onPointerDown={(e) => {
         if (!onScrub) return;
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-        setDragging(true);
-        onScrub(fractionFromEvent(e));
+        draggingRef.current = true;
+        setDragFrac(fractionFromEvent(e));
       }}
       onPointerMove={(e) => {
         if (!onScrub) return;
         const f = fractionFromEvent(e);
         setHoverFrac(f);
-        if (dragging) onScrub(f);
+        if (draggingRef.current) setDragFrac(f);
       }}
       onPointerUp={(e) => {
         if (!onScrub) return;
-        try { (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
-        setDragging(false);
+        try {
+          (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+        } catch {
+          /* noop */
+        }
+        if (draggingRef.current) {
+          const finalFrac = dragFrac ?? fractionFromEvent(e);
+          draggingRef.current = false;
+          setDragFrac(null);
+          // Commit only once, at release — no audio interruption during drag.
+          onScrub(finalFrac);
+        }
+      }}
+      onPointerCancel={() => {
+        // Aborted drag — don't seek, just clear scrub state.
+        draggingRef.current = false;
+        setDragFrac(null);
       }}
       onPointerLeave={() => {
         setHoverFrac(null);
-        setDragging(false);
       }}
     >
       <canvas
