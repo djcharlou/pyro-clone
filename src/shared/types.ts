@@ -97,6 +97,22 @@ export interface TrackAnalysis {
   waveform?: WaveformPeaks;
   loudness?: LoudnessInfo;
   autoCues?: AutoCue[];
+  /** Which service provided this analysis (default: our local DSP). */
+  source?: 'local' | 'spotify';
+  /** Spotify track URI (e.g. "spotify:track:xxx") if enriched from Spotify. */
+  spotifyTrackId?: string;
+  /** Extra Spotify audio features not covered by our other fields. */
+  spotifyFeatures?: SpotifyFeatures;
+}
+
+export interface SpotifyFeatures {
+  danceability: number;
+  valence: number;
+  acousticness: number;
+  instrumentalness: number;
+  speechiness: number;
+  liveness: number;
+  timeSignature: number;
 }
 
 export interface AnalyzedTrack extends Track {

@@ -71,7 +71,7 @@ interface AppState {
   setPlaylists(p: Playlist[]): void;
 
   // UI: bottom sheet open state
-  sheet: 'add' | 'playlists' | 'library' | null;
+  sheet: 'add' | 'playlists' | 'library' | 'spotify' | null;
   openSheet(s: AppState['sheet']): void;
 
   // Top-level view mode

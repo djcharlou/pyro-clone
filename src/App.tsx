@@ -16,8 +16,11 @@ import { AddSheet } from './components/AddSheet';
 import { PlaylistsSheet } from './components/PlaylistsSheet';
 import { WorkshopView } from './components/WorkshopView';
 import { HUD } from './components/HUD';
+import { SpotifySheet } from './components/SpotifySheet';
 import { smartReorderQueue } from './selector/smartReorder';
 import { store } from './db/IndexedDBStore';
+import { completeLoginIfCallback, loadAuth, type SpotifyAuthState } from './spotify/oauth';
+import { enrichWithSpotify } from './spotify/enrichment';
 import {
   importFiles,
   importViaDirectoryPicker,
@@ -64,6 +67,9 @@ export function App(): JSX.Element {
   const engineRef = useRef<AudioEngine | null>(null);
   const queueRef = useRef<AnalysisQueue | null>(null);
   const loadingNextRef = useRef(false);
+  const [spotifyAuth, setSpotifyAuth] = useState<SpotifyAuthState | null>(() => loadAuth());
+  const [enrichmentBusy, setEnrichmentBusy] = useState(false);
+  const [enrichmentStatus, setEnrichmentStatus] = useState('');
 
   useEffect(() => {
     const engine = new AudioEngine({
@@ -91,6 +97,16 @@ export function App(): JSX.Element {
       ]);
       setTracks(initialTracks);
       setPlaylists(initialPlaylists);
+      // Complete Spotify OAuth if we came back with ?code=
+      try {
+        const auth = await completeLoginIfCallback();
+        if (auth) {
+          setSpotifyAuth(auth);
+          openSheet('spotify');
+        }
+      } catch (err) {
+        console.error('[spotify oauth]', err);
+      }
     })();
 
     return () => {
@@ -334,6 +350,32 @@ export function App(): JSX.Element {
     }
   }
 
+  async function handleImportITunes(): Promise<void> {
+    setImportState({ running: true, added: 0, failed: 0, lastTrackTitle: '' });
+    try {
+      const summary = await importFromITunes(handleProgress);
+      if (!summary.available) {
+        alert(summary.reason ?? 'iTunes import is unavailable in the browser build.');
+        setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
+        return;
+      }
+      if (summary.reason && summary.added === 0) alert(summary.reason);
+      setImportState({
+        running: false,
+        added: summary.added,
+        failed: summary.failed,
+        lastTrackTitle: `${summary.added} added, ${summary.skipped} skipped`,
+      });
+      const refreshed = await store.listTracks();
+      setTracks(refreshed);
+      void analyzeUnanalyzed(refreshed);
+    } catch (err) {
+      console.error('[itunes]', err);
+      alert(`iTunes import failed: ${(err as Error).message}`);
+      setImportState({ running: false, added: 0, failed: 0, lastTrackTitle: '' });
+    }
+  }
+
   async function analyzeUnanalyzed(all: AnalyzedTrack[]): Promise<void> {
     const aq = queueRef.current;
     if (!aq) return;
@@ -446,6 +488,46 @@ export function App(): JSX.Element {
     setQueue(reordered.map((t) => t.id));
   }
 
+  async function runEnrichment(pool: AnalyzedTrack[]): Promise<void> {
+    if (pool.length === 0 || enrichmentBusy) return;
+    setEnrichmentBusy(true);
+    setEnrichmentStatus(`Starting enrichment on ${pool.length} track${pool.length > 1 ? 's' : ''}…`);
+    try {
+      const summary = await enrichWithSpotify(pool, (p) => {
+        if (p.phase === 'searching') {
+          setEnrichmentStatus(`Searching Spotify: ${p.done}/${p.total} · ${p.currentTitle ?? ''}`);
+        } else if (p.phase === 'features') {
+          setEnrichmentStatus(`Fetching audio features for ${p.total} tracks…`);
+        } else if (p.phase === 'saving') {
+          setEnrichmentStatus(`Saving: ${p.done}/${p.total}`);
+        } else if (p.phase === 'error') {
+          setEnrichmentStatus(`Error: ${p.error ?? 'unknown'}`);
+        }
+      });
+      setEnrichmentStatus(
+        `Done — ${summary.matched} matched, ${summary.unmatched} unmatched, ${summary.updated} updated${summary.errors ? `, ${summary.errors} errors` : ''}.`
+      );
+      const refreshed = await store.listTracks();
+      setTracks(refreshed);
+    } catch (err) {
+      setEnrichmentStatus(`Failed: ${(err as Error).message}`);
+    } finally {
+      setEnrichmentBusy(false);
+    }
+  }
+
+  function handleEnrichAll(): void {
+    const pool = tracks.filter((t) => !t.analysis?.spotifyTrackId);
+    void runEnrichment(pool);
+  }
+
+  function handleEnrichSelected(): void {
+    // For now: enrich everything without a spotifyTrackId — Workshop
+    // selection state is local to WorkshopView. We'll wire it up
+    // properly when we move selection into the store.
+    handleEnrichAll();
+  }
+
   return (
     <div className={`app app--${view}`}>
       <header className="app-header">
@@ -477,6 +559,13 @@ export function App(): JSX.Element {
               ⚡ {autoMix ? 'ON' : 'OFF'}
             </button>
           )}
+          <button
+            className={`header-btn ${spotifyAuth ? 'header-btn--on' : ''}`}
+            onClick={() => openSheet('spotify')}
+            title={spotifyAuth ? `Spotify — connected as ${spotifyAuth.user?.displayName ?? 'user'}` : 'Connect Spotify'}
+          >
+            🎧
+          </button>
           <button
             className="header-btn"
             onClick={() => openSheet('playlists')}
@@ -578,6 +667,21 @@ export function App(): JSX.Element {
           input.click();
         }}
         supportsDirectoryPicker={supportsDirectoryPicker()}
+        supportsITunes={isTauri()}
+        onImportITunes={() => void handleImportITunes()}
+      />
+
+      <SpotifySheet
+        open={sheet === 'spotify'}
+        onClose={() => openSheet(null)}
+        auth={spotifyAuth}
+        onDisconnect={() => setSpotifyAuth(null)}
+        onEnrichAll={handleEnrichAll}
+        onEnrichSelected={handleEnrichSelected}
+        enrichmentStatus={enrichmentStatus}
+        enrichmentBusy={enrichmentBusy}
+        tracksTotal={tracks.length}
+        tracksWithoutSpotify={tracks.filter((t) => !t.analysis?.spotifyTrackId).length}
       />
 
       <PlaylistsSheet
