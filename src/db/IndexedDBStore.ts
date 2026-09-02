@@ -132,6 +132,19 @@ export class IndexedDBStore {
   async deletePlaylist(id: string): Promise<void> {
     await this.require().delete('playlists', id);
   }
+
+  async deleteTrack(id: string): Promise<void> {
+    const db = this.require();
+    await Promise.all([
+      db.delete('tracks', id),
+      db.delete('analyses', id),
+      db.delete('fileHandles', id),
+    ]);
+  }
+
+  async deleteTracks(ids: string[]): Promise<void> {
+    for (const id of ids) await this.deleteTrack(id);
+  }
 }
 
 export const store = new IndexedDBStore();

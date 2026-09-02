@@ -185,6 +185,31 @@ export function App(): JSX.Element {
     [tracks]
   );
 
+  /** Tracks whose file we can't reach — imported in a previous session
+   * via browser-only APIs, so the relative filePath is unusable now. */
+  const orphanTracks = useMemo(() => {
+    if (!isTauri()) return [] as AnalyzedTrack[];
+    return tracks.filter((t) =>
+      !fileRegistry.has(t.id) &&
+      !(t.filePath ?? '').startsWith('/')
+    );
+  }, [tracks]);
+
+  async function handleCleanupOrphans(): Promise<void> {
+    if (orphanTracks.length === 0) return;
+    const ok = confirm(
+      `${orphanTracks.length} track${orphanTracks.length > 1 ? 's are' : ' is'} unreachable ` +
+      `(imported in a previous session via the browser file picker). ` +
+      `Remove them from the library? Files on disk stay untouched.`
+    );
+    if (!ok) return;
+    const ids = orphanTracks.map((t) => t.id);
+    await store.deleteTracks(ids);
+    for (const id of ids) removeFromQueue(id);
+    const refreshed = await store.listTracks();
+    setTracks(refreshed);
+  }
+
   // Suggestions: top-ranked matches for the LAST track in queue (or currently
   // playing if queue empty), excluding tracks already in queue + current.
   const suggestions: SelectionResult[] = useMemo(() => {
@@ -630,6 +655,16 @@ export function App(): JSX.Element {
           </button>
         </div>
         <div className="app-header-actions">
+          {orphanTracks.length > 0 && (
+            <button
+              className="auto-toggle"
+              style={{ background: 'rgba(184, 64, 53, 0.9)', color: '#fff' }}
+              onClick={() => void handleCleanupOrphans()}
+              title="Remove tracks from earlier sessions whose file paths were lost"
+            >
+              🧹 Clean {orphanTracks.length}
+            </button>
+          )}
           {view === 'party' && (
             <button
               className={`auto-toggle ${autoMix ? 'auto-toggle--on' : ''}`}
