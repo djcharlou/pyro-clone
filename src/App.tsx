@@ -14,6 +14,7 @@ import { QueueList } from './components/QueueList';
 import { Suggestions } from './components/Suggestions';
 import { AddSheet } from './components/AddSheet';
 import { PlaylistsSheet } from './components/PlaylistsSheet';
+import { WorkshopView } from './components/WorkshopView';
 import { store } from './db/IndexedDBStore';
 import {
   importFiles,
@@ -50,6 +51,8 @@ export function App(): JSX.Element {
   const setPlaylists = useStore((s) => s.setPlaylists);
   const sheet = useStore((s) => s.sheet);
   const openSheet = useStore((s) => s.openSheet);
+  const view = useStore((s) => s.view);
+  const setView = useStore((s) => s.setView);
 
   const engineRef = useRef<AudioEngine | null>(null);
   const queueRef = useRef<AnalysisQueue | null>(null);
@@ -412,20 +415,36 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="app">
+    <div className={`app app--${view}`}>
       <header className="app-header">
         <div className="app-brand">
           <span className="brand-dot" />
           pyro
         </div>
-        <div className="app-header-actions">
+        <div className="view-tabs">
           <button
-            className={`auto-toggle ${autoMix ? 'auto-toggle--on' : ''}`}
-            onClick={() => setAutoMix(!autoMix)}
-            title="Auto-mix"
+            className={`view-tab ${view === 'party' ? 'view-tab--active' : ''}`}
+            onClick={() => setView('party')}
           >
-            ⚡ Auto-mix {autoMix ? 'ON' : 'OFF'}
+            Party
           </button>
+          <button
+            className={`view-tab ${view === 'workshop' ? 'view-tab--active' : ''}`}
+            onClick={() => setView('workshop')}
+          >
+            Workshop
+          </button>
+        </div>
+        <div className="app-header-actions">
+          {view === 'party' && (
+            <button
+              className={`auto-toggle ${autoMix ? 'auto-toggle--on' : ''}`}
+              onClick={() => setAutoMix(!autoMix)}
+              title="Auto-mix"
+            >
+              ⚡ {autoMix ? 'ON' : 'OFF'}
+            </button>
+          )}
           <button
             className="header-btn"
             onClick={() => openSheet('playlists')}
@@ -436,31 +455,39 @@ export function App(): JSX.Element {
         </div>
       </header>
 
-      <NowPlaying
-        track={currentTrack}
-        playing={playing}
-        positionSec={positionSec}
-        durationSec={durationSec}
-        effectiveBpm={effectiveBpm}
-        stretchRatio={stretchRatio}
-        onPlayPause={handlePlayPause}
-        onSkip={() => void handleSkip()}
-        onSeekFraction={handleSeek}
-      />
+      {view === 'party' ? (
+        <>
+          <NowPlaying
+            track={currentTrack}
+            playing={playing}
+            positionSec={positionSec}
+            durationSec={durationSec}
+            effectiveBpm={effectiveBpm}
+            stretchRatio={stretchRatio}
+            onPlayPause={handlePlayPause}
+            onSkip={() => void handleSkip()}
+            onSeekFraction={handleSeek}
+          />
 
-      <main className="main">
-        <QueueList
-          queueTracks={queueTracks}
-          onRemove={removeFromQueue}
-          onMove={moveInQueue}
-          onPlayNow={(id) => void handlePlayNowFromQueue(id)}
-        />
+          <main className="main">
+            <QueueList
+              queueTracks={queueTracks}
+              onRemove={removeFromQueue}
+              onMove={moveInQueue}
+              onPlayNow={(id) => void handlePlayNowFromQueue(id)}
+            />
 
-        <Suggestions
-          candidates={suggestions}
-          onAdd={(id) => addToQueue(id)}
-        />
-      </main>
+            <Suggestions
+              candidates={suggestions}
+              onAdd={(id) => addToQueue(id)}
+            />
+          </main>
+        </>
+      ) : (
+        <main className="main main--workshop">
+          <WorkshopView />
+        </main>
+      )}
 
       <button
         className="fab"

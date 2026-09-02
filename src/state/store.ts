@@ -67,6 +67,16 @@ interface AppState {
   // UI: bottom sheet open state
   sheet: 'add' | 'playlists' | 'library' | null;
   openSheet(s: AppState['sheet']): void;
+
+  // Top-level view mode
+  view: 'party' | 'workshop';
+  setView(v: 'party' | 'workshop'): void;
+
+  // Update in-memory track fields (call sites also persist to IDB)
+  updateTrackFields(
+    id: string,
+    patch: Partial<Pick<AnalyzedTrack, 'title' | 'artist' | 'album' | 'genre'>>
+  ): void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -153,4 +163,12 @@ export const useStore = create<AppState>((set) => ({
 
   sheet: null,
   openSheet: (s) => set({ sheet: s }),
+
+  view: 'party',
+  setView: (v) => set({ view: v }),
+
+  updateTrackFields: (id, patch) =>
+    set((s) => ({
+      tracks: s.tracks.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+    })),
 }));
