@@ -308,7 +308,17 @@ export function App(): JSX.Element {
       if (loadingNextRef.current) return;
       loadingNextRef.current = true;
       try {
-        const playedSet = new Set(session.history);
+        // If a track was loaded but ended without a crossfade, mark it as
+        // played so we don't pick it again next tick (the "same track
+        // restarts" bug).
+        const endedId = active.track?.id;
+        if (endedId && !session.history.includes(endedId)) {
+          pushHistory(endedId);
+        }
+        const playedSet = new Set([
+          ...session.history,
+          ...(endedId ? [endedId] : []),
+        ]);
         // Pick first queue entry not yet played, else first library track
         const firstQueuedId = queue.find((id) => !playedSet.has(id));
         const first = firstQueuedId
@@ -319,6 +329,8 @@ export function App(): JSX.Element {
           await loadTrackIntoActive(first);
         }
         engine.playActive(first.analysis?.cues.mixInPoint ?? 0);
+        // Mark it as played immediately so nothing picks it again.
+        pushHistory(first.id);
       } finally {
         loadingNextRef.current = false;
       }
@@ -354,10 +366,12 @@ export function App(): JSX.Element {
     if (!engine) return;
     loadingNextRef.current = true;
     try {
-      // Prefer the first queue entry NOT already played this session.
-      // The queue behaves like a playlist — entries stay put; history
-      // is what makes us advance through them.
-      const playedSet = new Set(session.history);
+      // Never pick the currently-active track as the next one — that would
+      // crossfade the same song to itself (perceived as a restart).
+      const active = engine.getActive();
+      const activeId = active.track?.id;
+      const playedSet = new Set([...session.history, ...(activeId ? [activeId] : [])]);
+      // Prefer the first queue entry not yet played AND not the current one.
       const nextIdInQueue = queue.find((id) => !playedSet.has(id));
       if (nextIdInQueue) {
         const next = tracksById.get(nextIdInQueue);
@@ -367,12 +381,11 @@ export function App(): JSX.Element {
         }
       }
       // Else use the selector
-      const active = engine.getActive();
       if (!active.track) return;
       const analyzedPool = tracks.filter(
-        (t) => t.analysis && fileRegistry.has(t.id)
+        (t) => t.analysis && fileRegistry.has(t.id) && t.id !== activeId
       );
-      if (analyzedPool.length < 2) return;
+      if (analyzedPool.length < 1) return;
       const report = pickNext({
         pool: analyzedPool,
         current: active.track,
