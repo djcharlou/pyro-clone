@@ -1,6 +1,7 @@
 import { parseBlob } from 'music-metadata-browser';
 import type { Track } from '@shared/types';
 import { store } from '@/db/IndexedDBStore';
+import { pictureToDataUrl } from '@/library/coverArt';
 
 const AUDIO_EXTS = new Set([
   'mp3', 'wav', 'flac', 'aiff', 'aif', 'm4a', 'aac', 'ogg', 'opus',
@@ -231,6 +232,7 @@ async function fileToTrack(file: File, path: string): Promise<Track> {
   let durationSec = 0;
   let sampleRate = 44100;
   let channels = 2;
+  let coverArtDataUrl: string | undefined;
 
   try {
     const metadata = await parseBlob(file);
@@ -241,12 +243,17 @@ async function fileToTrack(file: File, path: string): Promise<Track> {
     durationSec = metadata.format.duration ?? 0;
     sampleRate = metadata.format.sampleRate ?? 44100;
     channels = metadata.format.numberOfChannels ?? 2;
+    const pic = metadata.common.picture?.[0];
+    if (pic?.data) {
+      coverArtDataUrl = await pictureToDataUrl({
+        data: pic.data as Uint8Array,
+        format: pic.format || 'image/jpeg',
+      });
+    }
   } catch {
     // ignore — keep filename defaults
   }
 
-  // music-metadata may not have duration for VBR mp3s without scanning the whole
-  // file. We can still proceed; analyzer will fill in via decoded audio.
   const id = await hashFile(file);
   return {
     id,
@@ -260,6 +267,7 @@ async function fileToTrack(file: File, path: string): Promise<Track> {
     sampleRate,
     channels,
     addedAt: Date.now(),
+    coverArtDataUrl,
   };
 }
 

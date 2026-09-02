@@ -29,6 +29,13 @@ export function QueueCard({
 
   return (
     <div className="qcard" style={{ background: cardBg }}>
+      <div className="qcard-cover">
+        {track.coverArtDataUrl ? (
+          <img src={track.coverArtDataUrl} alt="" loading="lazy" />
+        ) : (
+          <span className="qcard-cover-fallback">♪</span>
+        )}
+      </div>
       <div className="qcard-text">
         <div className="qcard-title">{track.title}</div>
         <div className="qcard-artist">{track.artist}</div>

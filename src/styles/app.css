@@ -268,10 +268,77 @@ input[type="text"] {
 /* === NOW PLAYING ========================================================== */
 
 .now-playing {
-  padding: 12px 18px 14px;
+  padding: 14px 18px 16px;
   background: rgba(0, 0, 0, 0.22);
   border-bottom: 1px solid rgba(0, 0, 0, 0.18);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
+.np-backdrop {
+  position: absolute;
+  inset: -20px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) saturate(1.4) brightness(0.55);
+  opacity: 0.65;
+  z-index: -1;
+  transform: scale(1.15);
+}
+.np-body { position: relative; z-index: 1; }
+.np-hero {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.np-cover {
+  width: 80px;
+  height: 80px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.4s ease-out;
+}
+.np-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.np-cover-fallback {
+  font-size: 32px;
+  color: rgba(255, 255, 255, 0.35);
+}
+.np-cover--playing { animation: nowPlayingPulse 3s ease-in-out infinite; }
+@keyframes nowPlayingPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5); }
+  50% { transform: scale(1.02); box-shadow: 0 6px 26px rgba(0, 0, 0, 0.65), 0 0 20px rgba(255, 200, 100, 0.2); }
+}
+.np-chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.np-chip {
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  padding: 3px 9px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.np-chip--bpm { background: rgba(255, 255, 255, 0.15); }
+.np-chip--key { background: rgba(255, 255, 255, 0.22); }
 .np-title-row {
   display: flex;
   justify-content: space-between;
@@ -368,14 +435,37 @@ input[type="text"] {
 /* QueueCard */
 .qcard {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 44px 1fr auto auto;
   align-items: center;
   gap: 10px;
-  padding: 11px 14px;
+  padding: 8px 12px 8px 8px;
   border-radius: 10px;
   box-shadow: var(--card-shadow);
   position: relative;
-  min-height: 56px;
+  min-height: 60px;
+  transition: transform 0.08s ease-out;
+}
+.qcard:active { transform: scale(0.99); }
+.qcard-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.qcard-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.qcard-cover-fallback {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 18px;
 }
 .qcard-text { min-width: 0; }
 .qcard-title {

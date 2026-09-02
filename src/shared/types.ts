@@ -81,6 +81,8 @@ export interface Track {
   sampleRate: number;
   channels: number;
   addedAt: number;
+  /** Small (~200×200) JPEG data-URL extracted from the file's cover art. */
+  coverArtDataUrl?: string;
 }
 
 export interface TrackAnalysis {

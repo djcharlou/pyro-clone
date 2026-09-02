@@ -26,25 +26,42 @@ export function NowPlaying({
 }: Props): JSX.Element {
   const progress = durationSec > 0 ? positionSec / durationSec : 0;
 
+  const coverUrl = track?.coverArtDataUrl;
+
   return (
-    <section className="now-playing">
-      <div className="np-title-row">
-        <div className="np-text">
-          <div className="np-title">{track?.title ?? 'No track playing'}</div>
-          <div className="np-artist">{track?.artist ?? '—'}</div>
-        </div>
-        <div className="np-meta">
-          {track?.analysis && (
-            <>
-              <span className="np-bpm">
-                {(effectiveBpm ?? track.analysis.beatGrid.bpm).toFixed(0)} BPM
-                {Math.abs(stretchRatio - 1) > 0.001 && (
-                  <span className="np-stretch"> ({stretchRatio > 1 ? '+' : ''}{((stretchRatio - 1) * 100).toFixed(1)}%)</span>
-                )}
-              </span>
-              <span className="np-key">{track.analysis.key.camelot}</span>
-            </>
-          )}
+    <section className={`now-playing ${playing ? 'now-playing--playing' : ''}`}>
+      {coverUrl && (
+        <div
+          className="np-backdrop"
+          style={{ backgroundImage: `url("${coverUrl}")` }}
+          aria-hidden="true"
+        />
+      )}
+      <div className="np-body">
+        <div className="np-hero">
+          <div className={`np-cover ${playing ? 'np-cover--playing' : ''}`}>
+            {coverUrl ? (
+              <img src={coverUrl} alt="" />
+            ) : (
+              <div className="np-cover-fallback">♪</div>
+            )}
+          </div>
+          <div className="np-text">
+            <div className="np-title">{track?.title ?? 'No track playing'}</div>
+            <div className="np-artist">{track?.artist ?? '—'}</div>
+            {track?.analysis && (
+              <div className="np-chips">
+                <span className="np-chip np-chip--bpm">
+                  {(effectiveBpm ?? track.analysis.beatGrid.bpm).toFixed(0)} BPM
+                  {Math.abs(stretchRatio - 1) > 0.001 && (
+                    <span className="np-stretch"> ({stretchRatio > 1 ? '+' : ''}{((stretchRatio - 1) * 100).toFixed(1)}%)</span>
+                  )}
+                </span>
+                <span className="np-chip np-chip--key">{track.analysis.key.camelot}</span>
+                <span className="np-chip">{Math.round(track.analysis.energy.mean * 10)}/10</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
