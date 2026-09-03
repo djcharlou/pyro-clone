@@ -22,6 +22,7 @@ import {
 import { estimateKey } from './key';
 import { bpmFromName, reconcileBpm } from './bpmFromName';
 import { makeConstBpm } from './beatUtils';
+import { detectAutoCues, barEnergies } from './autoCues';
 import { computeIntegratedLufs } from './loudness';
 import { detectBpmV2, ellisBeatTrackFor } from './beatTrackerV2';
 import { computeSeratoOverview } from './seratoOverview';
@@ -137,6 +138,13 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     isStable: input.serato ? true : (v2.isStable || isStable),
   };
 
+  // Cue points and per-bar energy for the waveform display. Both need the
+  // finished beat grid, so they run after it rather than alongside.
+  const autoCues = detectAutoCues(
+    downsampled, ANALYSIS_RATE, beats, downbeats, input.durationSec
+  );
+  const sectionEnergy = barEnergies(downsampled, ANALYSIS_RATE, downbeats, input.durationSec);
+
   // Key
   const key = estimateKey(downsampled, ANALYSIS_RATE);
 
@@ -170,6 +178,8 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     energy,
     cues,
     waveform,
+    autoCues,
+    sectionEnergy,
     loudness,
     seratoOverviewB64,
   };

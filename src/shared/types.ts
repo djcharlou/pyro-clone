@@ -104,6 +104,8 @@ export interface TrackAnalysis {
   waveform?: WaveformPeaks;
   loudness?: LoudnessInfo;
   autoCues?: AutoCue[];
+  /** Per-bar energy 0..1, for the coloured strip under the waveform. */
+  sectionEnergy?: Array<{ startSec: number; endSec: number; energy: number }>;
   /** Serato Overview GEOB bytes as base64 — ready to embed at tag-write time. */
   seratoOverviewB64?: SeratoOverviewB64;
   /** Which service provided this analysis (default: our local DSP). */

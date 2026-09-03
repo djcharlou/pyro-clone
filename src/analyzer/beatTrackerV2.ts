@@ -185,7 +185,7 @@ function tempoFromEnvelope(
 
 /* ---- Ellis DP beat tracker -------------------------------------------- */
 
-const TIGHTNESS = 100; // higher = beats stick to expected interval more strictly
+const TIGHTNESS = 300; // higher = beats stick to expected interval more strictly
 
 function ellisBeatTrack(
   onset: Float32Array,
@@ -202,7 +202,12 @@ function ellisBeatTrack(
   // Expressed as positive distances rather than signed offsets: the signed
   // form invited a Math.max(1, negative) clamp that collapsed the window to
   // a single frame and made the inner loop dead code.
-  const minBack = Math.max(1, Math.floor(0.5 * period));
+  // Floor the gap between consecutive beats at 70% of the expected period.
+  // At 50% the tracker could treat a straight off-beat hi-hat as a beat and
+  // split one beat into two — measured as intervals like 546/267/279ms on
+  // house-style material, which wrecked the constant-region analysis
+  // downstream. Raising the floor forbids that structurally.
+  const minBack = Math.max(1, Math.floor(0.7 * period));
   const maxBack = Math.max(minBack + 1, Math.ceil(2 * period));
 
   for (let t = 0; t < N; t++) {

@@ -1458,12 +1458,6 @@ input[type="text"] {
    ground rather than compete with the party gradient.
    ========================================================================== */
 
-.app--decks { max-width: 1180px; }
-.main--decks {
-  padding: 10px 12px 18px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
 .fab--hidden { display: none; }
 
 .decks-view {
@@ -1677,13 +1671,6 @@ input[type="text"] {
   .mixer-channels { gap: 32px; }
 }
 
-/* Decks view: gear keeps its natural size and sits centred in the window,
-   rather than being stretched to fill or stranded against the top edge. */
-.app--decks .main--decks {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 .decks-view { width: 100%; max-width: 1120px; }
 .deckp-meta--empty { min-height: 30px; align-items: center; }
 .deckp-hint {
@@ -1715,4 +1702,239 @@ input[type="text"] {
   background: rgba(255, 215, 106, 0.12);
   border-radius: 6px;
   padding: 5px 9px;
+}
+
+/* ==========================================================================
+   MIX DESK — two decks, a mixer, and the library underneath.
+   Dark and low-chroma on purpose: the waveforms and key badges carry the
+   colour, and they cannot read against a competing background.
+   ========================================================================== */
+
+/* The party gradient is wrong behind the mix desk: the waveforms and key
+   badges are the only colour that should carry, and a red chrome fights them. */
+.app--decks { max-width: none; background: #0d0f14; }
+.app--decks .app-header {
+  background: #0d0f14;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+/* flex:1 + min-height:0 is what stops the library from growing the page
+   instead of scrolling inside itself — without the zero minimum a flex or
+   grid child refuses to shrink below its content and the decks get pushed
+   off the top. */
+.main--decks {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.fab--hidden { display: none; }
+
+.mixdesk {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  min-height: 0;
+  background: #0d0f14;
+}
+
+.mixdesk-top {
+  display: grid;
+  grid-template-columns: 1fr 240px 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.deckcol { background: #12151c; min-width: 0; display: flex; flex-direction: column; }
+
+/* ---- Waveform ------------------------------------------------------------ */
+
+.dwave { position: relative; background: #0a0c11; }
+.dwave-canvas-wrap { position: absolute; inset: 0; }
+.dwave-zoom {
+  position: absolute; right: 8px; top: 32px;
+  display: flex; gap: 4px;
+}
+.dwave-zoom button {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 14px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.dwave-zoom button:hover { background: rgba(255, 255, 255, 0.16); }
+
+/* ---- Deck info strip ----------------------------------------------------- */
+
+.dstrip {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'play title actions' 'play meta actions' 'note note note';
+  align-items: center;
+  gap: 4px 12px;
+  padding: 12px 14px;
+  color: #e8eaf0;
+}
+.dstrip-play {
+  grid-area: play;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: #1c2029; border: 1px solid rgba(255,255,255,0.16);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.dstrip-play:hover:not(:disabled) { background: #262c38; }
+.dstrip-play:disabled { opacity: 0.35; cursor: not-allowed; }
+.dstrip-play--on { background: #fff; border-color: #fff; }
+.dstrip-icon-play {
+  width: 0; height: 0;
+  border-left: 12px solid currentColor;
+  border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+  color: #e8eaf0; margin-left: 3px;
+}
+.dstrip-play--on .dstrip-icon-play { color: #10131a; }
+.dstrip-icon-pause {
+  width: 12px; height: 14px;
+  border-left: 4px solid #10131a; border-right: 4px solid #10131a;
+}
+.dstrip-title {
+  grid-area: title;
+  font-size: 15px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dstrip-meta {
+  grid-area: meta;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-size: 12px; color: rgba(232, 234, 240, 0.75);
+}
+.dstrip-stat em { font-style: normal; color: rgba(232,234,240,0.5); margin-right: 3px; }
+.dstrip-stat { font-variant-numeric: tabular-nums; }
+.dstrip-keyname { color: rgba(232,234,240,0.85); }
+.dstrip-keyshift { display: inline-flex; align-items: center; gap: 6px; }
+.dstrip-arrow { color: rgba(232,234,240,0.5); }
+.dstrip-semitones {
+  color: #ffd76a; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.dstrip-time { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.7; }
+.dstrip-empty { opacity: 0.45; }
+.dstrip-actions { grid-area: actions; display: flex; gap: 6px; }
+.dstrip-btn {
+  background: #1c2029; color: #e8eaf0;
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 7px;
+  padding: 7px 13px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.dstrip-btn:hover:not(:disabled) { background: #262c38; }
+.dstrip-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.dstrip-btn--on { background: #ffd76a; border-color: #ffd76a; color: #10131a; }
+.dstrip-note {
+  grid-area: note;
+  margin-top: 6px; font-size: 11px; color: #ffd76a;
+  background: rgba(255,215,106,0.12); border-radius: 6px; padding: 5px 9px;
+}
+
+/* ---- Key badge ----------------------------------------------------------- */
+
+.keybadge {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.keybadge--md { min-width: 42px; padding: 5px 8px; font-size: 13px; }
+.keybadge--sm { min-width: 34px; padding: 3px 6px; font-size: 11px; }
+.keybadge--empty { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.4); }
+
+/* ---- Centre mixer -------------------------------------------------------- */
+
+.mixdesk-center {
+  background: #12151c;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 14px; padding: 12px 10px 16px;
+}
+.mixdesk-center-head {
+  font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase;
+  color: rgba(232,234,240,0.4); font-weight: 700;
+}
+.mixdesk-eqs { display: flex; gap: 18px; }
+.mixdesk-eqcol { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mixdesk-eqlabel { font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+.mixdesk-xfader { width: 100%; display: flex; flex-direction: column; gap: 3px; align-items: center; }
+.mixdesk-xfader-ends {
+  display: flex; justify-content: space-between; width: 190px;
+  font-size: 10px; font-weight: 700; color: rgba(232,234,240,0.4);
+}
+
+/* Controls inherit the desk's palette rather than the party gradient. */
+.mixdesk .knob-label, .mixdesk .fader-label { color: rgba(232,234,240,0.45); }
+.mixdesk .knob-value, .mixdesk .fader-value { color: rgba(232,234,240,0.8); }
+
+/* ---- Library ------------------------------------------------------------- */
+
+.lib2 {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  background: #0d0f14; border-top: 1px solid rgba(255,255,255,0.08);
+}
+.lib2-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; flex-wrap: wrap;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.lib2-count { font-size: 13px; font-weight: 600; color: #e8eaf0; }
+.lib2-count em { font-style: normal; color: rgba(232,234,240,0.5); font-weight: 400; }
+.lib2-search {
+  flex: 1; min-width: 180px;
+  background: #171b23; color: #e8eaf0;
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  padding: 7px 12px; font-size: 13px;
+}
+.lib2-search::placeholder { color: rgba(232,234,240,0.35); }
+.lib2-select {
+  background: #171b23; color: #e8eaf0;
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  padding: 7px 10px; font-size: 12px; cursor: pointer;
+}
+.lib2-reset {
+  background: transparent; color: #ffd76a; border: none;
+  font-size: 12px; text-decoration: underline; cursor: pointer;
+}
+.lib2-analysed { font-size: 11px; color: rgba(232,234,240,0.4); margin-left: auto; }
+
+.lib2-scroll { overflow: auto; min-height: 0; flex: 1; }
+.lib2-table { width: 100%; border-collapse: collapse; font-size: 12.5px; color: #e8eaf0; }
+.lib2-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: #171b23; text-align: left;
+  padding: 8px 10px; font-size: 11px; font-weight: 600;
+  color: rgba(232,234,240,0.6);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  white-space: nowrap;
+}
+.lib2-th { cursor: pointer; user-select: none; }
+.lib2-th:hover { color: #fff; }
+.lib2-th--on { color: #fff; }
+.lib2-table td {
+  padding: 5px 10px; border-bottom: 1px solid rgba(255,255,255,0.05);
+  vertical-align: middle;
+}
+.lib2-table tbody tr:hover { background: rgba(255,255,255,0.045); }
+.lib2-c { text-align: center; }
+.lib2-num { font-variant-numeric: tabular-nums; }
+.lib2-ellipsis { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib2-cover { width: 38px; padding: 3px 6px !important; }
+.lib2-cover img { width: 30px; height: 30px; border-radius: 4px; object-fit: cover; display: block; }
+.lib2-cover-none {
+  width: 30px; height: 30px; border-radius: 4px;
+  background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.3);
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+}
+.lib2-load { white-space: nowrap; }
+.lib2-load button {
+  width: 24px; height: 24px; margin: 0 2px;
+  background: #1c2029; color: #e8eaf0;
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 5px;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+}
+.lib2-load button:hover { background: #2b3240; }
+.lib2-empty, .lib2-more {
+  padding: 24px; text-align: center; color: rgba(232,234,240,0.45); font-size: 12px;
+}
+
+@media (max-width: 1000px) {
+  .mixdesk-top { grid-template-columns: 1fr; }
+  .mixdesk-center { flex-direction: row; justify-content: center; flex-wrap: wrap; }
 }

@@ -1,60 +1,54 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AnalyzedTrack } from '@shared/types';
 import type { AudioEngine } from '@/audio/AudioEngine';
-import { DeckPanel } from './DeckPanel';
-import { Mixer } from './Mixer';
+import { DeckWaveform } from './DeckWaveform';
+import { DeckStrip } from './DeckStrip';
+import { Fader } from './Fader';
+import { Knob } from './Knob';
+import { LibraryBrowser } from './LibraryBrowser';
 
 interface Props {
   engine: AudioEngine | null;
-  /** Latest store copies, so metadata added after load still shows. */
   tracksById: Map<string, AnalyzedTrack>;
+  tracks: AnalyzedTrack[];
   onLoadNext(side: 'A' | 'B'): void;
+  onLoadTrack(side: 'A' | 'B', trackId: string): void;
   onSeek(side: 'A' | 'B', fraction: number): void;
   onCue(side: 'A' | 'B'): void;
   onPlayPause(side: 'A' | 'B'): void;
 }
 
+const COLOR: Record<'A' | 'B', string> = { A: '#4fe3c1', B: '#ff8fb0' };
+
 /**
- * Two-deck CDJ layout: a deck either side of a mixer strip.
+ * Two-deck mixing view: a full-width waveform per deck with its cue points
+ * and energy shape, a mixer between them, and the library underneath.
  *
- * Everything here drives the audio engine directly rather than going through
- * the auto-mix queue, so it is the manual counterpart to the Party view.
+ * The waveforms get the space because they are what you read while mixing;
+ * the controls are sized to be hit, not admired.
  */
 export function DecksView({
   engine,
   tracksById,
+  tracks,
   onLoadNext,
+  onLoadTrack,
   onSeek,
   onCue,
   onPlayPause,
 }: Props): JSX.Element {
-  // The audio graph is not React state, so drive repaints from a timer.
-  // 20fps is enough for the jog wheel to read as continuous rotation while
-  // staying far cheaper than requestAnimationFrame on a canvas this size.
-  const [tick, setTick] = useState(0);
+  // The audio graph is not React state, so repaint on a timer.
+  const [, setTick] = useState(0);
   const [crossfader, setCrossfader] = useState(() => engine?.getCrossfader() ?? 0);
-  // Why a sync attempt was refused, per deck — shown next to the button so
-  // a no-op is explained rather than silent.
   const [syncNote, setSyncNote] = useState<{ A: string | null; B: string | null }>({ A: null, B: null });
-
-  function handleSync(side: 'A' | 'B'): void {
-    const r = engine?.syncDeck(side);
-    if (!r) return;
-    setSyncNote((prev) => ({ ...prev, [side]: r.ok ? null : r.reason ?? 'Sync unavailable' }));
-    if (r.ok) {
-      // Clear any stale note on the other deck too; the pair is in step now.
-      setSyncNote({ A: null, B: null });
-    }
-  }
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((n) => n + 1), 50);
     return () => window.clearInterval(id);
   }, []);
 
-  // Hand the mix to the faders while this view is open, and give it back on
-  // the way out. Without this the auto-fade's gain staging keeps the
-  // inactive deck muted and the channel fader / crossfader do nothing.
+  // Hand the mix to the faders while this view is open; the auto-fade's gain
+  // staging otherwise keeps the inactive deck muted.
   useEffect(() => {
     engine?.setManualMode(true);
     setCrossfader(engine?.getCrossfader() ?? 0);
@@ -63,7 +57,6 @@ export function DecksView({
 
   const deckA = engine?.deckA ?? null;
   const deckB = engine?.deckB ?? null;
-  const activeId = engine?.getActiveId() ?? 'A';
 
   const trackFor = (side: 'A' | 'B'): AnalyzedTrack | null => {
     const deck = side === 'A' ? deckA : deckB;
@@ -71,53 +64,119 @@ export function DecksView({
     return tracksById.get(deck.track.id) ?? deck.track;
   };
 
+  function handleSync(side: 'A' | 'B'): void {
+    const r = engine?.syncDeck(side);
+    if (!r) return;
+    if (r.ok) setSyncNote({ A: null, B: null });
+    else setSyncNote((p) => ({ ...p, [side]: r.reason ?? 'Sync unavailable' }));
+  }
+
+  const analysisReady = useMemo(
+    () => tracks.filter((t) => t.analysis).length,
+    [tracks]
+  );
+
+  const renderDeck = (side: 'A' | 'B'): JSX.Element => {
+    const deck = side === 'A' ? deckA : deckB;
+    const track = trackFor(side);
+    const position = deck?.positionSec() ?? 0;
+    // The deck reports 0 until its buffer has decoded, and `??` does not catch
+    // a zero — without this the waveform divides by it and drops every cue.
+    const deckDuration = deck?.duration ?? 0;
+    const duration = deckDuration > 0 ? deckDuration : track?.durationSec ?? 0;
+    return (
+      <div className={`deckcol deckcol--${side.toLowerCase()}`}>
+        <DeckWaveform
+          peaks={track?.analysis?.waveform}
+          cues={track?.analysis?.autoCues}
+          sectionEnergy={track?.analysis?.sectionEnergy}
+          positionSec={position}
+          durationSec={duration}
+          color={COLOR[side]}
+          height={150}
+          onScrub={track ? (f) => onSeek(side, f) : undefined}
+        />
+        <DeckStrip
+          side={side}
+          deck={deck}
+          track={track}
+          playing={deck?.isPlaying ?? false}
+          positionSec={position}
+          durationSec={duration}
+          onPlayPause={() => onPlayPause(side)}
+          onCue={() => onCue(side)}
+          onSync={() => handleSync(side)}
+          onLoad={() => onLoadNext(side)}
+          syncNote={syncNote[side]}
+          synced={Math.abs((deck?.getStretchRatio() ?? 1) - 1) > 0.0005}
+        />
+      </div>
+    );
+  };
+
   return (
-    <div className="decks-view">
-      <DeckPanel
-        side="A"
-        deck={deckA}
-        track={trackFor('A')}
-        isActive={activeId === 'A'}
-        tick={tick}
-        onPlayPause={() => onPlayPause('A')}
-        onCue={() => onCue('A')}
-        onSeekFraction={(f) => onSeek('A', f)}
-        onPitchChange={(p) => deckA?.setPitchPercent(p)}
-        onNudge={(d) => deckA?.nudge(d)}
-        onLoadFromQueue={() => onLoadNext('A')}
-        onSync={() => handleSync('A')}
-        syncNote={syncNote.A}
-        synced={Math.abs((deckA?.getStretchRatio() ?? 1) - 1) > 0.0005}
-      />
+    <div className="mixdesk">
+      <div className="mixdesk-top">
+        {renderDeck('A')}
 
-      <Mixer
-        deckA={deckA}
-        deckB={deckB}
-        crossfader={crossfader}
-        tick={tick}
-        onCrossfader={(v) => {
-          setCrossfader(v);
-          engine?.setCrossfader(v);
-        }}
-        onVolume={(side, v) => (side === 'A' ? deckA : deckB)?.setVolume(v)}
-        onEq={(side, band, db) => (side === 'A' ? deckA : deckB)?.setEq(band, db)}
-      />
+        <div className="mixdesk-center">
+          <div className="mixdesk-center-head">Mixer</div>
 
-      <DeckPanel
-        side="B"
-        deck={deckB}
-        track={trackFor('B')}
-        isActive={activeId === 'B'}
-        tick={tick}
-        onPlayPause={() => onPlayPause('B')}
-        onCue={() => onCue('B')}
-        onSeekFraction={(f) => onSeek('B', f)}
-        onPitchChange={(p) => deckB?.setPitchPercent(p)}
-        onNudge={(d) => deckB?.nudge(d)}
-        onLoadFromQueue={() => onLoadNext('B')}
-        onSync={() => handleSync('B')}
-        syncNote={syncNote.B}
-        synced={Math.abs((deckB?.getStretchRatio() ?? 1) - 1) > 0.0005}
+          <div className="mixdesk-eqs">
+            {(['A', 'B'] as const).map((side) => {
+              const deck = side === 'A' ? deckA : deckB;
+              return (
+                <div key={side} className="mixdesk-eqcol">
+                  <div className="mixdesk-eqlabel" style={{ color: COLOR[side] }}>{side}</div>
+                  {(['high', 'mid', 'low'] as const).map((band) => (
+                    <Knob
+                      key={band}
+                      label={band.toUpperCase()}
+                      value={deck?.getEq(band) ?? 0}
+                      min={-26}
+                      max={6}
+                      center={0}
+                      size={38}
+                      format={(v) => (v <= -25.5 ? 'KILL' : `${v > 0 ? '+' : ''}${v.toFixed(0)}`)}
+                      onChange={(v) => deck?.setEq(band, v)}
+                    />
+                  ))}
+                  <Fader
+                    value={deck?.getVolume() ?? 1}
+                    min={0}
+                    max={1}
+                    center={1}
+                    length={92}
+                    format={(v) => `${Math.round(v * 100)}`}
+                    onChange={(v) => deck?.setVolume(v)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mixdesk-xfader">
+            <Fader
+              value={crossfader}
+              min={-1}
+              max={1}
+              center={0}
+              centerDetent
+              orientation="horizontal"
+              length={190}
+              onChange={(v) => { setCrossfader(v); engine?.setCrossfader(v); }}
+            />
+            <div className="mixdesk-xfader-ends"><span>A</span><span>B</span></div>
+          </div>
+        </div>
+
+        {renderDeck('B')}
+      </div>
+
+      <LibraryBrowser
+        tracks={tracks}
+        analysedCount={analysisReady}
+        onLoadTo={(side, id) => onLoadTrack(side, id)}
       />
     </div>
   );

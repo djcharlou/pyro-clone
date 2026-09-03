@@ -747,6 +747,22 @@ export function App(): JSX.Element {
     forceUpdate((x) => x + 1);
   }
 
+  /** Load one specific track onto a named deck (library A/B buttons). */
+  async function handleDeckLoadTrack(side: 'A' | 'B', trackId: string): Promise<void> {
+    const deck = deckFor(side);
+    const track = tracksById.get(trackId);
+    if (!deck || !track) return;
+    const buffer = await loadAudioBuffer(track);
+    if (!buffer) return;
+    try {
+      await deck.load(track, buffer);
+    } catch (err) {
+      console.error('[decks] load failed', track.title, err);
+      return;
+    }
+    forceUpdate((x) => x + 1);
+  }
+
   /** Load the first not-yet-played queue entry onto a specific deck. */
   async function handleDeckLoad(side: 'A' | 'B'): Promise<void> {
     const engine = engineRef.current;
@@ -1020,7 +1036,9 @@ export function App(): JSX.Element {
           <DecksView
             engine={engineRef.current}
             tracksById={tracksById}
+            tracks={tracks}
             onLoadNext={(side) => void handleDeckLoad(side)}
+            onLoadTrack={(side, id) => void handleDeckLoadTrack(side, id)}
             onSeek={handleDeckSeek}
             onCue={handleDeckCue}
             onPlayPause={handleDeckPlayPause}
