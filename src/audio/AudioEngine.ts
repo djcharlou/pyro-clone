@@ -21,6 +21,8 @@ export class AudioEngine {
   private activeDeck: ActiveDeck = 'A';
   private listeners: EngineListeners;
   private transitionTimer: number | null = null;
+  /** Last manual crossfader position, -1 (A) .. +1 (B). */
+  private crossfaderPosition = 0;
 
   constructor(listeners: EngineListeners = {}) {
     this.listeners = listeners;
@@ -291,6 +293,23 @@ export class AudioEngine {
   hardSwitch(): void {
     this.activeDeck = this.activeDeck === 'A' ? 'B' : 'A';
     this.listeners.onDeckUpdate?.();
+  }
+
+  /**
+   * Manual crossfader. -1 = deck A only, 0 = both, +1 = deck B only.
+   * Equal-power law so the perceived level stays constant across the throw.
+   */
+  setCrossfader(position: number): void {
+    const p = Math.max(-1, Math.min(1, position));
+    // Map -1..1 onto 0..1 then take the quarter-circle either side.
+    const x = (p + 1) / 2;
+    this.deckA.setCrossfadeGain(Math.cos((x * Math.PI) / 2));
+    this.deckB.setCrossfadeGain(Math.sin((x * Math.PI) / 2));
+    this.crossfaderPosition = p;
+  }
+
+  getCrossfader(): number {
+    return this.crossfaderPosition;
   }
 
   setMasterVolume(v: number): void {

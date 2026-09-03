@@ -75,8 +75,8 @@ interface AppState {
   openSheet(s: AppState['sheet']): void;
 
   // Top-level view mode
-  view: 'party' | 'workshop';
-  setView(v: 'party' | 'workshop'): void;
+  view: 'party' | 'decks' | 'workshop';
+  setView(v: 'party' | 'decks' | 'workshop'): void;
 
   // Update in-memory track fields (call sites also persist to IDB)
   updateTrackFields(

@@ -1450,3 +1450,244 @@ input[type="text"] {
   background: #fff;
   color: #111;
 }
+
+/* ==========================================================================
+   DECKS VIEW — CDJ-style manual layout
+   Two decks flanking a mixer strip. Darker than the Party view: this is the
+   "hands on the gear" mode, and the controls need to read against a quiet
+   ground rather than compete with the party gradient.
+   ========================================================================== */
+
+.app--decks { max-width: 1180px; }
+.main--decks {
+  padding: 10px 12px 18px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.fab--hidden { display: none; }
+
+.decks-view {
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, auto) 1fr;
+  gap: 14px;
+  align-items: stretch;
+  width: 100%;
+}
+.decks-view > * { align-self: stretch; }
+.mixer { justify-content: center; }
+
+/* ---- Deck panel ---------------------------------------------------------- */
+
+.deckp {
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.deckp--active {
+  border-color: rgba(255, 255, 255, 0.42);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset;
+}
+
+.deckp-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.deckp-id {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px;
+  color: #14161c;
+  flex-shrink: 0;
+}
+.deckp-title-wrap { min-width: 0; flex: 1; }
+.deckp-title {
+  font-weight: 700; font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.deckp-artist {
+  font-size: 11px; color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.deckp-live {
+  font-size: 9px; font-weight: 800; letter-spacing: 1.2px;
+  background: #fff; color: #14161c;
+  padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+}
+
+.deckp-wave {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  padding: 6px 8px 4px;
+}
+.deckp-times {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.deckp-meta {
+  display: flex; align-items: baseline; gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.deckp-bpm { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+.deckp-bpm em { font-size: 11px; font-style: normal; opacity: 0.55; font-weight: 600; }
+.deckp-basebpm { font-size: 10px; color: rgba(255, 255, 255, 0.45); }
+.deckp-key {
+  margin-left: auto;
+  font-size: 12px; font-weight: 700;
+  background: rgba(255, 255, 255, 0.14);
+  padding: 3px 9px; border-radius: 6px;
+}
+
+.deckp-body {
+  display: flex; align-items: center; justify-content: space-around;
+  gap: 12px; padding: 4px 0;
+}
+.jog-wheel { cursor: grab; display: block; }
+.jog-wheel:active { cursor: grabbing; }
+
+.deckp-transport { display: flex; gap: 6px; }
+.deckp-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.10);
+  color: #fff;
+  border: none; border-radius: 8px;
+  padding: 10px 0;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.6px;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.06s;
+}
+.deckp-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.deckp-btn:active:not(:disabled) { transform: scale(0.97); }
+.deckp-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.deckp-btn--play { flex: 1.4; font-size: 15px; }
+.deckp-btn--on { background: #fff; color: #14161c; }
+
+/* ---- Mixer --------------------------------------------------------------- */
+
+.mixer {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  align-items: center;
+}
+.mixer-channels { display: flex; gap: 22px; }
+.mixer-channel {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.mixer-channel-id {
+  font-size: 10px; font-weight: 800; letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.mixer-xfader { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.mixer-xfader-ends {
+  display: flex; justify-content: space-between;
+  font-size: 10px; font-weight: 800; letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 0 2px;
+}
+
+/* ---- Knob ---------------------------------------------------------------- */
+
+.knob { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.knob-dial {
+  position: relative;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255,255,255,0.16), rgba(0,0,0,0.5) 70%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: ns-resize;
+  touch-action: none;
+}
+.knob-dial:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.knob-dial--active { border-color: rgba(255, 255, 255, 0.7); }
+.knob-indicator {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 2px; height: 42%;
+  background: #fff;
+  border-radius: 1px;
+  transform-origin: 50% 100%;
+  margin-left: -1px;
+  margin-top: -42%;
+}
+.knob-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.knob-value {
+  font-size: 10px; font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ---- Fader --------------------------------------------------------------- */
+
+.fader { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.fader-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.fader-track {
+  position: relative;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+.fader-track:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.fader--vertical .fader-track { width: 26px; }
+.fader--horizontal .fader-track { height: 26px; }
+.fader-track--active { border-color: rgba(255, 255, 255, 0.5); }
+.fader-cap {
+  position: absolute;
+  background: linear-gradient(180deg, #f4f4f4, #b8b8b8);
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.fader--vertical .fader-cap {
+  left: 3px; right: 3px; height: 16px; margin-bottom: -8px;
+}
+.fader--horizontal .fader-cap {
+  top: 3px; bottom: 3px; width: 16px; margin-left: -8px;
+}
+.fader-detent {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+}
+.fader--vertical .fader-detent { left: 0; right: 0; top: 50%; height: 1px; }
+.fader--horizontal .fader-detent { top: 0; bottom: 0; left: 50%; width: 1px; }
+.fader-value {
+  font-size: 10px; font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ---- Narrow screens: stack decks, mixer between them --------------------- */
+
+@media (max-width: 900px) {
+  .decks-view { grid-template-columns: 1fr; }
+  .mixer-channels { gap: 32px; }
+}
+
+/* Decks view: gear keeps its natural size and sits centred in the window,
+   rather than being stretched to fill or stranded against the top edge. */
+.app--decks .main--decks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.decks-view { width: 100%; max-width: 1120px; }
+.deckp-meta--empty { min-height: 30px; align-items: center; }
+.deckp-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.35;
+}

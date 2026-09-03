@@ -33,6 +33,7 @@ import { importFromITunes, isTauri } from './library/itunes';
 import { pickAudioFilesNative, pickFolderNative } from './library/tauriImport';
 import { effectiveMixInPoint, effectiveMixOutPoint } from './library/cues';
 import { resyncLibrary } from './analyzer/resyncFromTags';
+import { DecksView } from './components/decks/DecksView';
 
 export function App(): JSX.Element {
   const [, forceUpdate] = useState(0);
@@ -711,6 +712,64 @@ export function App(): JSX.Element {
     forceUpdate((x) => x + 1);
   }
 
+  /* ---------------- Manual deck controls (Decks view) ---------------- */
+
+  function deckFor(side: 'A' | 'B') {
+    const engine = engineRef.current;
+    return side === 'A' ? engine?.deckA ?? null : engine?.deckB ?? null;
+  }
+
+  function handleDeckPlayPause(side: 'A' | 'B'): void {
+    const deck = deckFor(side);
+    if (!deck?.track) return;
+    void engineRef.current?.ensureRunning();
+    if (deck.isPlaying) deck.pause();
+    else if (deck.isPaused) deck.resume();
+    else deck.play(effectiveMixInPoint(deck.track));
+    forceUpdate((x) => x + 1);
+  }
+
+  function handleDeckCue(side: 'A' | 'B'): void {
+    const deck = deckFor(side);
+    if (!deck?.track) return;
+    void engineRef.current?.ensureRunning();
+    // CDJ behaviour: cue jumps to the cue point and plays from there.
+    deck.play(effectiveMixInPoint(deck.track));
+    forceUpdate((x) => x + 1);
+  }
+
+  function handleDeckSeek(side: 'A' | 'B', fraction: number): void {
+    const deck = deckFor(side);
+    if (!deck?.track) return;
+    deck.play(Math.max(0, Math.min(1, fraction)) * deck.duration);
+    forceUpdate((x) => x + 1);
+  }
+
+  /** Load the first not-yet-played queue entry onto a specific deck. */
+  async function handleDeckLoad(side: 'A' | 'B'): Promise<void> {
+    const engine = engineRef.current;
+    const deck = deckFor(side);
+    if (!engine || !deck) return;
+    const played = new Set(session.history);
+    const onDecks = new Set(
+      [engine.deckA.track?.id, engine.deckB.track?.id].filter(Boolean) as string[]
+    );
+    const nextId =
+      queue.find((id) => !played.has(id) && !onDecks.has(id)) ??
+      queue.find((id) => !onDecks.has(id));
+    const track = nextId ? tracksById.get(nextId) : undefined;
+    if (!track) return;
+    const buffer = await loadAudioBuffer(track);
+    if (!buffer) return;
+    try {
+      await deck.load(track, buffer);
+    } catch (err) {
+      console.error('[decks] load failed', track.title, err);
+      return;
+    }
+    forceUpdate((x) => x + 1);
+  }
+
   // Sheet handlers
   async function handleSavePlaylist(name: string): Promise<void> {
     if (queue.length === 0) return;
@@ -824,6 +883,12 @@ export function App(): JSX.Element {
             onClick={() => setView('party')}
           >
             Party
+          </button>
+          <button
+            className={`view-tab ${view === 'decks' ? 'view-tab--active' : ''}`}
+            onClick={() => setView('decks')}
+          >
+            Decks
           </button>
           <button
             className={`view-tab ${view === 'workshop' ? 'view-tab--active' : ''}`}
@@ -948,6 +1013,17 @@ export function App(): JSX.Element {
             />
           </main>
         </>
+      ) : view === 'decks' ? (
+        <main className="main main--decks">
+          <DecksView
+            engine={engineRef.current}
+            tracksById={tracksById}
+            onLoadNext={(side) => void handleDeckLoad(side)}
+            onSeek={handleDeckSeek}
+            onCue={handleDeckCue}
+            onPlayPause={handleDeckPlayPause}
+          />
+        </main>
       ) : (
         <main className="main main--workshop">
           <WorkshopView />
@@ -955,7 +1031,7 @@ export function App(): JSX.Element {
       )}
 
       <button
-        className="fab"
+        className={`fab ${view !== 'party' ? 'fab--hidden' : ''}`}
         onClick={() => openSheet('add')}
         aria-label="Add tracks"
       >

@@ -15,6 +15,11 @@ export class Deck {
   readonly midEQ: BiquadFilterNode;
   readonly highEQ: BiquadFilterNode;
   readonly hp: BiquadFilterNode;
+  /** Channel fader — the user's manual level for this deck. */
+  readonly volume: GainNode;
+  /** Crossfader contribution. Separate from `gain` so the manual crossfader
+   *  and the automatic beat-matched fade never fight over one parameter. */
+  readonly xfade: GainNode;
   readonly output: GainNode;
 
   private ctx: AudioContext;
@@ -75,14 +80,23 @@ export class Deck {
     this.gain = ctx.createGain();
     this.gain.gain.value = 1;
 
+    this.volume = ctx.createGain();
+    this.volume.gain.value = 1;
+
+    this.xfade = ctx.createGain();
+    this.xfade.gain.value = 1;
+
     this.output = ctx.createGain();
     this.output.gain.value = 1;
 
+    // source → EQ → HPF → auto-fade gain → channel fader → crossfader → out
     this.lowEQ
       .connect(this.midEQ)
       .connect(this.highEQ)
       .connect(this.hp)
       .connect(this.gain)
+      .connect(this.volume)
+      .connect(this.xfade)
       .connect(this.output);
   }
 
@@ -279,6 +293,69 @@ export class Deck {
     this.bufferStartOffset = offsetSec;
     this.playing = true;
     this.listeners.onPlay?.();
+  }
+
+  /** Channel fader, 0..1 linear. */
+  setVolume(v: number): void {
+    const clamped = Math.max(0, Math.min(1, v));
+    this.volume.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
+  }
+
+  getVolume(): number {
+    return this.volume.gain.value;
+  }
+
+  /** Crossfader contribution for this deck, 0..1. */
+  setCrossfadeGain(v: number): void {
+    const clamped = Math.max(0, Math.min(1, v));
+    this.xfade.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
+  }
+
+  /**
+   * Three-band EQ in dB. Kill range is -26dB, which is low enough to read as
+   * "off" without the numerical instability of -Infinity.
+   */
+  setEq(band: 'low' | 'mid' | 'high', db: number): void {
+    const clamped = Math.max(-26, Math.min(6, db));
+    const node = band === 'low' ? this.lowEQ : band === 'mid' ? this.midEQ : this.highEQ;
+    node.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
+  }
+
+  getEq(band: 'low' | 'mid' | 'high'): number {
+    const node = band === 'low' ? this.lowEQ : band === 'mid' ? this.midEQ : this.highEQ;
+    return node.gain.value;
+  }
+
+  /**
+   * Pitch fader, as a percentage in [-8, 8] like a CDJ.
+   * Applied immediately rather than glided — the user is holding the fader.
+   */
+  setPitchPercent(percent: number): void {
+    const clamped = Math.max(-8, Math.min(8, percent));
+    this.setStretchRatio(1 + clamped / 100);
+  }
+
+  getPitchPercent(): number {
+    return (this.stretchRatio - 1) * 100;
+  }
+
+  /**
+   * Temporary rate offset for jog-wheel nudging: push the track forward or
+   * back without changing the pitch setting it returns to.
+   */
+  nudge(ratioDelta: number, durationSec = 0.12): void {
+    if (!this.source) return;
+    const base = this.stretchRatio;
+    const target = Math.max(0.25, base + ratioDelta);
+    const now = this.ctx.currentTime;
+    const p = this.source.playbackRate;
+    p.cancelScheduledValues(now);
+    p.setValueAtTime(target, now);
+    p.setValueAtTime(target, now + durationSec);
+    p.linearRampToValueAtTime(base, now + durationSec + 0.05);
+    // The nudge is deliberately NOT recorded in rateSegments: it is brief
+    // and symmetric enough that the playhead error stays sub-frame, and
+    // tracking it would complicate every position read for no benefit.
   }
 
   get isPaused(): boolean {
