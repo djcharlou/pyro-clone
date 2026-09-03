@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Local-file automix DJ engine — pure web app, runs in any modern browser",
+  "description": "Local-file automix DJ engine \u2014 pure web app, runs in any modern browser",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
@@ -14,7 +14,8 @@
     "tauri:build": "tauri build",
     "tauri:build:mac": "tauri build --target aarch64-apple-darwin",
     "tauri:build:mac-intel": "tauri build --target x86_64-apple-darwin",
-    "tauri:build:win": "tauri build --target x86_64-pc-windows-msvc"
+    "tauri:build:win": "tauri build --target x86_64-pc-windows-msvc",
+    "test": "for f in tests/*.test.ts; do echo \"--- $f\"; npx tsx \"$f\" || exit 1; done"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.7.3",
