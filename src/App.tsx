@@ -77,6 +77,12 @@ export function App(): JSX.Element {
   const [enrichmentBusy, setEnrichmentBusy] = useState(false);
   const [enrichmentStatus, setEnrichmentStatus] = useState('');
   const [playbackBridge, setPlaybackBridge] = useState<PlayerBridge | null>(null);
+  // Whether a track leaves the queue once it has played. Off by default:
+  // the queue reads as a playlist you can replay from. Persisted so the
+  // choice survives a restart.
+  const [drainQueue, setDrainQueue] = useState<boolean>(() => {
+    try { return localStorage.getItem('pyro.drainQueue') === '1'; } catch { return false; }
+  });
 
   useEffect(() => {
     const engine = new AudioEngine({
@@ -84,7 +90,18 @@ export function App(): JSX.Element {
       onTransitionEnd: () => {
         setActiveDeck(engine.getActiveId());
         const active = engine.getActive();
-        if (active.track) pushHistory(active.track.id);
+        if (!active.track) return;
+        pushHistory(active.track.id);
+        // In drain mode the track that just finished leaves the queue, so
+        // the list behaves like a crate you work through. Read the flag
+        // from localStorage rather than closing over React state, since
+        // this callback is created once at mount.
+        let drain = false;
+        try { drain = localStorage.getItem('pyro.drainQueue') === '1'; } catch { /* private mode */ }
+        if (drain) {
+          const finishedId = engine.getInactive().track?.id;
+          if (finishedId) removeFromQueue(finishedId);
+        }
       },
     });
     engineRef.current = engine;
@@ -205,7 +222,7 @@ export function App(): JSX.Element {
   const autoMixNextInSec: number | null = useMemo(() => {
     if (!autoMix || !currentTrack || !playing) return null;
     const bpmA = currentTrack.analysis?.beatGrid.bpm ?? 120;
-    const fadeBeats = 32;
+    const fadeBeats = 64;
     const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
     const mixOut = effectiveMixOutPoint(currentTrack, 16);
     return Math.max(0, mixOut - fadeDur - positionSec);
@@ -369,7 +386,7 @@ export function App(): JSX.Element {
     }
 
     const bpmA = active.bpm;
-    const fadeBeats = 32;
+    const fadeBeats = 64;
     const fadeDur = Math.min(20, Math.max(6, (fadeBeats * 60) / bpmA));
 
     const pos = active.positionSec();
@@ -592,7 +609,7 @@ export function App(): JSX.Element {
     const nextDeck = engine.getInactive();
     if (nextDeck.track) {
       const offset = effectiveMixInPoint(nextDeck.track);
-      engine.crossfade({ durationBeats: 32, deckBStartOffset: offset });
+      engine.crossfade({ durationBeats: 64, deckBStartOffset: offset });
     }
   }
 
@@ -617,7 +634,7 @@ export function App(): JSX.Element {
     const nextDeck = engine.getInactive();
     if (nextDeck.track) {
       const offset = effectiveMixInPoint(nextDeck.track);
-      engine.crossfade({ durationBeats: 32, deckBStartOffset: offset });
+      engine.crossfade({ durationBeats: 64, deckBStartOffset: offset });
     }
   }
 
@@ -640,6 +657,43 @@ export function App(): JSX.Element {
     pushHistory(id);
     /* Keep the entry in the playlist — history advancement is enough
      * for the auto-mix to skip it next round. */
+  }
+
+  function handleToggleDrainQueue(next: boolean): void {
+    setDrainQueue(next);
+    try { localStorage.setItem('pyro.drainQueue', next ? '1' : '0'); } catch { /* private mode */ }
+    // Turning it on retroactively clears what has already played, so the
+    // list immediately matches the setting the user just chose.
+    if (next) {
+      const played = new Set(session.history);
+      setQueue(queue.filter((id) => !played.has(id) || id === currentTrack?.id));
+    }
+  }
+
+  function handleResetSession(): void {
+    if (!confirm('Clear the queue and forget what has played? Your library stays.')) return;
+    engineRef.current?.getActive().stop();
+    engineRef.current?.getInactive().stop();
+    clearQueue();
+    resetSession();
+    setLastPick(null);
+    forceUpdate((x) => x + 1);
+  }
+
+  async function handleResetLibrary(): Promise<void> {
+    if (!confirm(
+      `Erase all ${tracks.length} tracks, their analysis and every saved playlist?\n\n` +
+      'This only clears what pyro stored — your audio files on disk are not touched.'
+    )) return;
+    engineRef.current?.getActive().stop();
+    engineRef.current?.getInactive().stop();
+    await store.clearAll();
+    clearQueue();
+    resetSession();
+    setLastPick(null);
+    setTracks([]);
+    setPlaylists([]);
+    forceUpdate((x) => x + 1);
   }
 
   // Sheet handlers
@@ -870,6 +924,7 @@ export function App(): JSX.Element {
               onRemove={removeFromQueue}
               onMove={moveInQueue}
               onPlayNow={(id) => void handlePlayNowFromQueue(id)}
+              playingId={currentTrack?.id ?? null}
             />
 
             <Suggestions
@@ -955,6 +1010,11 @@ export function App(): JSX.Element {
         onSaveCurrent={(name) => void handleSavePlaylist(name)}
         onLoad={(id) => void handleLoadPlaylist(id)}
         onDelete={(id) => void handleDeletePlaylist(id)}
+        onResetSession={handleResetSession}
+        onResetLibrary={() => void handleResetLibrary()}
+        libraryCount={tracks.length}
+        drainQueue={drainQueue}
+        onToggleDrainQueue={handleToggleDrainQueue}
       />
     </div>
   );

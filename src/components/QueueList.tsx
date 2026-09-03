@@ -10,6 +10,8 @@ interface Props {
   onRemove(id: string): void;
   onMove(fromIdx: number, toIdx: number): void;
   onPlayNow(id: string): void;
+  /** Track currently on the active deck — highlighted, not dimmed. */
+  playingId?: string | null;
 }
 
 export function QueueList({
@@ -19,6 +21,7 @@ export function QueueList({
   onRemove,
   onMove,
   onPlayNow,
+  playingId = null,
 }: Props): JSX.Element {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -39,11 +42,18 @@ export function QueueList({
         // track for the first queue slot). Null when we can't compute.
         const reference = i === 0 ? currentTrack : queueTracks[i - 1];
         const matchScore = computeMatchScore(reference, t, session);
+        // The queue behaves like a playlist: entries stay put after they
+        // play. Without a visual cue the list looks like it is repeating
+        // itself, so mark what is done and what is on the deck right now.
+        const isPlaying = t.id === playingId;
+        const isPlayed = !isPlaying && session.history.includes(t.id);
         return (
           <QueueCard
             key={`${t.id}-${i}`}
             track={t}
             matchScore={matchScore}
+            isPlaying={isPlaying}
+            isPlayed={isPlayed}
             onRemove={() => onRemove(t.id)}
             onMoveUp={i > 0 ? () => onMove(i, i - 1) : undefined}
             onMoveDown={i < queueTracks.length - 1 ? () => onMove(i, i + 1) : undefined}

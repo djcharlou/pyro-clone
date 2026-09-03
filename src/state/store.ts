@@ -147,8 +147,22 @@ export const useStore = create<AppState>((set) => ({
 
   queue: [],
   setQueue: (ids) => set({ queue: ids }),
-  addToQueue: (id) => set((s) => ({ queue: [...s.queue, id] })),
-  addManyToQueue: (ids) => set((s) => ({ queue: [...s.queue, ...ids] })),
+  // The queue is a playlist, so an id may appear at most once. Without this
+  // the selector re-adds a track that is already queued and the mix loops on
+  // the same song.
+  addToQueue: (id) =>
+    set((s) => (s.queue.includes(id) ? s : { queue: [...s.queue, id] })),
+  addManyToQueue: (ids) =>
+    set((s) => {
+      const seen = new Set(s.queue);
+      const fresh: string[] = [];
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id); // also de-duplicates within `ids` itself
+        fresh.push(id);
+      }
+      return fresh.length ? { queue: [...s.queue, ...fresh] } : s;
+    }),
   removeFromQueue: (id) =>
     set((s) => ({ queue: s.queue.filter((q) => q !== id) })),
   moveInQueue: (fromIdx, toIdx) =>

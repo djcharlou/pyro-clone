@@ -9,6 +9,14 @@ interface Props {
   onSaveCurrent(name: string): void;
   onLoad(playlistId: string): void;
   onDelete(playlistId: string): void;
+  /** Wipe every imported track, analysis and playlist. */
+  onResetLibrary(): void;
+  /** Clear queue + play history, keep the imported library. */
+  onResetSession(): void;
+  libraryCount: number;
+  /** Whether played tracks are removed from the queue automatically. */
+  drainQueue: boolean;
+  onToggleDrainQueue(next: boolean): void;
 }
 
 export function PlaylistsSheet({
@@ -19,6 +27,11 @@ export function PlaylistsSheet({
   onSaveCurrent,
   onLoad,
   onDelete,
+  onResetLibrary,
+  onResetSession,
+  libraryCount,
+  drainQueue,
+  onToggleDrainQueue,
 }: Props): JSX.Element | null {
   const [name, setName] = useState('');
 
@@ -58,6 +71,24 @@ export function PlaylistsSheet({
           </button>
         </div>
 
+        <div className="sheet-settings">
+          <label className="sheet-setting-row">
+            <input
+              type="checkbox"
+              checked={drainQueue}
+              onChange={(e) => onToggleDrainQueue(e.target.checked)}
+            />
+            <span>
+              <strong>Remove tracks once played</strong>
+              <em>
+                {drainQueue
+                  ? 'The queue empties as it plays, like a DJ crate.'
+                  : 'Played tracks stay in the list, dimmed, so you can replay them.'}
+              </em>
+            </span>
+          </label>
+        </div>
+
         <div className="sheet-list">
           {playlists.length === 0 && (
             <div className="sheet-empty">No saved playlists yet.</div>
@@ -88,6 +119,30 @@ export function PlaylistsSheet({
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="sheet-danger">
+          <div className="sheet-danger-head">Reset</div>
+          <div className="sheet-danger-actions">
+            <button
+              className="sheet-danger-btn"
+              onClick={onResetSession}
+              title="Empty the queue and forget what has played — keeps your library"
+            >
+              Reset session
+            </button>
+            <button
+              className="sheet-danger-btn sheet-danger-btn--destructive"
+              onClick={onResetLibrary}
+              title="Remove every imported track, analysis and playlist"
+            >
+              Erase library ({libraryCount})
+            </button>
+          </div>
+          <p className="sheet-danger-note">
+            Erasing the library only clears what pyro stored. Your audio files
+            on disk are never touched.
+          </p>
         </div>
       </div>
     </div>

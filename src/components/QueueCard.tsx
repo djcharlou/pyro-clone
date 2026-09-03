@@ -16,6 +16,10 @@ interface Props {
   onDragEnd?: (e: React.DragEvent<HTMLDivElement>) => void;
   isDropTarget?: boolean;
   isDragging?: boolean;
+  /** On the active deck right now. */
+  isPlaying?: boolean;
+  /** Already played this session — dimmed so the running order stays legible. */
+  isPlayed?: boolean;
 }
 
 export function QueueCard({
@@ -32,6 +36,8 @@ export function QueueCard({
   onDragEnd,
   isDropTarget,
   isDragging,
+  isPlaying,
+  isPlayed,
 }: Props): JSX.Element {
   const bpm = track.analysis?.beatGrid.bpm;
   const key = track.analysis?.key.camelot;
@@ -51,6 +57,8 @@ export function QueueCard({
     draggable ? 'qcard--draggable' : '',
     isDragging ? 'qcard--dragging' : '',
     isDropTarget ? 'qcard--drop' : '',
+    isPlaying ? 'qcard--playing' : '',
+    isPlayed ? 'qcard--played' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -72,7 +80,11 @@ export function QueueCard({
         )}
       </div>
       <div className="qcard-text">
-        <div className="qcard-title">{track.title}</div>
+        <div className="qcard-title">
+          {isPlaying && <span className="qcard-flag qcard-flag--live">▶ NOW</span>}
+          {isPlayed && <span className="qcard-flag">PLAYED</span>}
+          {track.title}
+        </div>
         <div className="qcard-artist">{track.artist}</div>
       </div>
       <div className="qcard-meta">

@@ -1423,3 +1423,30 @@ input[type="text"] {
 
 /* Hide FAB on workshop view */
 .app--workshop .fab { display: none; }
+
+/* === QUEUE CARD play state ================================================ */
+
+/* The queue is a playlist, so entries stay after they play. These states
+   keep the running order readable: what is on the deck, what is done. */
+.qcard--playing {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: -2px;
+}
+.qcard--played { opacity: 0.5; }
+.qcard--played .qcard-cover { filter: grayscale(0.7); }
+.qcard-flag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  background: rgba(0, 0, 0, 0.4);
+  color: rgba(255, 255, 255, 0.85);
+}
+.qcard-flag--live {
+  background: #fff;
+  color: #111;
+}

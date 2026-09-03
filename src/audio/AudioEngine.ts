@@ -121,9 +121,9 @@ export class AudioEngine {
    * (or null if it couldn't be scheduled).
    */
   crossfade(opts: {
-    durationBeats?: number;       // default 32
-    minDurationSec?: number;      // default 6
-    maxDurationSec?: number;      // default 20
+    durationBeats?: number;       // default 64 (a 16-bar phrase)
+    minDurationSec?: number;      // default 8
+    maxDurationSec?: number;      // default 40
     deckBStartOffset?: number;    // default 0 (or B.cues.mixInPoint upstream)
     leadTimeSec?: number;         // default 0.05
   } = {}): number | null {
@@ -135,9 +135,12 @@ export class AudioEngine {
       return null;
     }
 
-    const durationBeats = opts.durationBeats ?? 32;
-    const minDurationSec = opts.minDurationSec ?? 6;
-    const maxDurationSec = opts.maxDurationSec ?? 20;
+    // 64 beats is a full 16-bar phrase — the length a DJ actually blends
+    // over. 32 was landing around 15s, which reads as a quick fade rather
+    // than a mix. The ceiling is raised to match so it isn't clamped away.
+    const durationBeats = opts.durationBeats ?? 64;
+    const minDurationSec = opts.minDurationSec ?? 8;
+    const maxDurationSec = opts.maxDurationSec ?? 40;
     const offsetForB = opts.deckBStartOffset ?? 0;
     const leadTimeSec = opts.leadTimeSec ?? 0.05;
 
@@ -181,18 +184,28 @@ export class AudioEngine {
     }
 
     // --- Equal-power crossfade ramp ---------------------------------------
-    const SAMPLES = 64;
+    // setValueAtTime holds each value until the next one, so scheduling a
+    // curve as a series of those produces a staircase — audible as a
+    // stepped, gritty fade rather than a blend. setValueCurveAtTime
+    // interpolates between points instead, which is what makes it smooth.
+    const CURVE_POINTS = 512;
+    const outCurve = new Float32Array(CURVE_POINTS);
+    const inCurve = new Float32Array(CURVE_POINTS);
+    for (let i = 0; i < CURVE_POINTS; i++) {
+      const x = i / (CURVE_POINTS - 1);
+      // Equal power: the summed loudness stays constant across the blend.
+      outCurve[i] = Math.cos((x * Math.PI) / 2);
+      inCurve[i] = Math.sin((x * Math.PI) / 2);
+    }
+
     active.gain.gain.cancelScheduledValues(t0);
     next.gain.gain.cancelScheduledValues(t0);
     active.gain.gain.setValueAtTime(active.gain.gain.value, t0);
-    next.gain.gain.setValueAtTime(0, t0 - 0.001 > 0 ? t0 - 0.001 : 0);
-
-    for (let i = 0; i <= SAMPLES; i++) {
-      const x = i / SAMPLES;
-      const t = t0 + x * fadeDur;
-      active.gain.gain.setValueAtTime(Math.cos((x * Math.PI) / 2), t);
-      next.gain.gain.setValueAtTime(Math.sin((x * Math.PI) / 2), t);
-    }
+    next.gain.gain.setValueAtTime(0, Math.max(0, t0 - 0.001));
+    active.gain.gain.setValueCurveAtTime(outCurve, t0, fadeDur);
+    next.gain.gain.setValueCurveAtTime(inCurve, t0, fadeDur);
+    // setValueCurveAtTime leaves the param at the final curve value; pin it
+    // explicitly so nothing drifts after the fade.
     active.gain.gain.setValueAtTime(0, t1 + 0.001);
     next.gain.gain.setValueAtTime(1, t1 + 0.001);
 
