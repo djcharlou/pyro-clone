@@ -22,6 +22,7 @@ import {
 import { estimateKey } from './key';
 import { bpmFromName, reconcileBpm } from './bpmFromName';
 import { computeIntegratedLufs } from './loudness';
+import { detectBpmV2 } from './beatTrackerV2';
 
 const ANALYSIS_RATE = 22050;
 const ENV_WINDOW = 256; // ~11ms @ 22050Hz
@@ -55,29 +56,45 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   const mono = mixdownToMono(input.channels);
   const downsampled = resample(mono, input.sampleRate, ANALYSIS_RATE);
 
-  // Tempo — audio estimate first, then reconciled with any BPM written in
-  // the filename. The name wins when present: for DJ-edit libraries it is
-  // ground truth, and it removes the octave guesswork entirely.
-  const env = energyEnvelope(downsampled, ENV_WINDOW);
-  const onsets = onsetEnvelope(env);
-  const estimated = estimateBpmFromOnsets(onsets, ENV_FPS);
+  // Tempo hierarchy of trust:
+  //   Serato tag (exact) > filename BPM (DJ-edit ground truth) > audio v2 detector
+  // The v2 detector uses spectral flux + Rayleigh-weighted ACF + Ellis 2007
+  // dynamic-programming beat tracker — much better than the naive
+  // autocorrelation we had before, especially on non-EDM material.
+  const v2 = detectBpmV2(downsampled, ANALYSIS_RATE);
   const named = input.nameHint ? bpmFromName(input.nameHint) : null;
-  const reconciled = reconcileBpm(named, estimated);
+  const reconciled = reconcileBpm(named, { bpm: v2.bpm, confidence: v2.bpmConfidence });
 
-  // Serato's own analysis wins outright when the file carries it.
   const bpm = input.serato
     ? input.serato.bpm
     : reconciled.source === 'name'
       ? reconciled.bpm
-      : normalizeBpmOctave(reconciled.bpm);
+      : reconciled.bpm; // v2 already handles octave via Rayleigh weighting
   const bpmConfidence = input.serato ? 1 : reconciled.confidence;
 
-  // Beat grid — Serato's marker is an exact anchor, so prefer it over the
-  // comb-filter search when available.
-  const firstBeatTime = input.serato
-    ? input.serato.firstBeatSec
-    : estimateFirstBeat(onsets, bpm, ENV_FPS);
-  const { beats, downbeats } = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
+  // Beat grid — prefer real beats from the v2 tracker over a synthetic grid.
+  //   1. Serato anchor if present (exact),
+  //   2. else the v2 tracker's actual beat positions,
+  //   3. else fall back to synthesized grid from firstBeat + period.
+  let beats: number[];
+  let downbeats: number[];
+  let firstBeatTime: number;
+  if (input.serato) {
+    firstBeatTime = input.serato.firstBeatSec;
+    const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
+    beats = grid.beats;
+    downbeats = grid.downbeats;
+  } else if (v2.beats.length >= 16) {
+    firstBeatTime = v2.beats[0];
+    beats = v2.beats;
+    // Assume 4/4; every 4th beat = downbeat
+    downbeats = beats.filter((_, i) => i % 4 === 0);
+  } else {
+    firstBeatTime = v2.firstBeatTime;
+    const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
+    beats = grid.beats;
+    downbeats = grid.downbeats;
+  }
   const isStable = checkBeatStability(beats);
 
   const beatGrid: BeatGrid = {
@@ -86,7 +103,7 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     bpmConfidence,
     beats,
     downbeats,
-    isStable: input.serato ? true : isStable,
+    isStable: input.serato ? true : (v2.isStable || isStable),
   };
 
   // Key
