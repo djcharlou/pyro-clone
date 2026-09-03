@@ -36,7 +36,12 @@ export interface BeatTrackResult {
 }
 
 const FFT_WIN = 1024;
-const FFT_HOP = 512;
+// 256 at 22.05 kHz gives an 11.6 ms envelope step. The previous 512 gave
+// 23 ms, which quantised beat positions coarsely enough that a median of
+// inter-beat intervals landed a whole BPM off (a 128 track measured 129.2),
+// and blew the 25 ms constant-region tolerance on anything but perfect
+// material. Twice the FFTs, but this is offline analysis.
+const FFT_HOP = 256;
 const MIN_BPM = 60;
 const MAX_BPM = 200;
 const RAYLEIGH_CENTER_BPM = 120;
@@ -135,6 +140,12 @@ function tempoFromEnvelope(
   // Rayleigh weighting centred around 120 BPM. Kills octave picks that
   // an unweighted ACF prefers on kick-heavy tracks.
   const rayleighCenterLag = (60 / RAYLEIGH_CENTER_BPM) * envFps;
+  // sigma = centerLag/sqrt(2) is empirical, not the textbook mode. Setting
+  // sigma to the centre lag itself (so the Rayleigh peaks there) measures
+  // markedly worse — mean error 38 BPM against 15 — because this weight
+  // multiplies an un-normalised ACF whose sums shrink with lag, and the two
+  // biases have to offset each other. Swept the alternatives before keeping
+  // this; see tests/bpm-v2-vs-mixxx.test.ts.
   const sigma = rayleighCenterLag / Math.sqrt(2);
   const weighted = new Float32Array(acf.length);
   for (let lag = minLag; lag <= maxLag; lag++) {
@@ -187,17 +198,20 @@ function ellisBeatTrack(
   const backlink = new Int32Array(N);
   for (let i = 0; i < N; i++) backlink[i] = -1;
 
-  // Search window is ±20% of one period back from each frame
-  const winStart = Math.max(1, Math.floor(-2 * period));
-  const winEnd = Math.max(1, Math.ceil(-0.5 * period));
+  // Look back between half a period and two periods for the previous beat.
+  // Expressed as positive distances rather than signed offsets: the signed
+  // form invited a Math.max(1, negative) clamp that collapsed the window to
+  // a single frame and made the inner loop dead code.
+  const minBack = Math.max(1, Math.floor(0.5 * period));
+  const maxBack = Math.max(minBack + 1, Math.ceil(2 * period));
 
   for (let t = 0; t < N; t++) {
     let bestPrev = -1;
     let bestScore = -Infinity;
-    for (let d = winEnd; d >= winStart; d--) {
-      const p = t + d;
-      if (p < 0 || p >= t) continue;
-      const interval = t - p;
+    for (let back = minBack; back <= maxBack; back++) {
+      const p = t - back;
+      if (p < 0) break;
+      const interval = back;
       // Transition cost — log-sq deviation from the ideal period
       const dev = Math.log(interval / period);
       const cost = TIGHTNESS * (dev * dev);
@@ -286,4 +300,23 @@ function estimateFirstBeat(onset: Float32Array, envFps: number, bpm: number): nu
 
 function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
+}
+
+/**
+ * Run the DP beat tracker against a tempo decided elsewhere.
+ *
+ * The tempo estimator in dsp.ts resolves octaves more reliably than the
+ * Rayleigh-weighted ACF here, so the pipeline pairs its tempo with this
+ * tracker's beat positions rather than using either half alone.
+ */
+export function ellisBeatTrackFor(
+  mono: Float32Array,
+  sampleRate: number,
+  bpm: number
+): { beats: number[]; score: number; envFps: number } {
+  const envFps = sampleRate / FFT_HOP;
+  const onset = spectralFluxEnvelope(mono);
+  const normOnset = localMeanNormalize(onset, Math.floor(envFps * 4));
+  const tracked = ellisBeatTrack(normOnset, envFps, bpm);
+  return { ...tracked, envFps };
 }

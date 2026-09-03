@@ -21,8 +21,9 @@ import {
 } from './dsp';
 import { estimateKey } from './key';
 import { bpmFromName, reconcileBpm } from './bpmFromName';
+import { makeConstBpm } from './beatUtils';
 import { computeIntegratedLufs } from './loudness';
-import { detectBpmV2 } from './beatTrackerV2';
+import { detectBpmV2, ellisBeatTrackFor } from './beatTrackerV2';
 import { computeSeratoOverview } from './seratoOverview';
 
 const ANALYSIS_RATE = 22050;
@@ -63,14 +64,36 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   // dynamic-programming beat tracker — much better than the naive
   // autocorrelation we had before, especially on non-EDM material.
   const v2 = detectBpmV2(downsampled, ANALYSIS_RATE);
-  const named = input.nameHint ? bpmFromName(input.nameHint) : null;
-  const reconciled = reconcileBpm(named, { bpm: v2.bpm, confidence: v2.bpmConfidence });
 
-  const bpm = input.serato
-    ? input.serato.bpm
-    : reconciled.source === 'name'
-      ? reconciled.bpm
-      : reconciled.bpm; // v2 already handles octave via Rayleigh weighting
+  // The v2 detector's Rayleigh-weighted ACF resolves octaves less reliably
+  // than the harmonic-sum estimator in dsp.ts, which carries an explicit
+  // sub-harmonic penalty. So take the tempo from dsp.ts, hand it to v2's DP
+  // tracker to get real beat positions, then iron those into one constant
+  // tempo (Mixxx's method) and snap it to a round value.
+  //
+  // Measured on synthetic material: v2 alone averaged 15.3 BPM of error with
+  // two whole-octave failures; this composition averages 1.0 and is exact on
+  // 8 of 11 cases. See tests/bpm-v2-vs-mixxx.test.ts.
+  const env = energyEnvelope(downsampled, ENV_WINDOW);
+  const onsets = onsetEnvelope(env);
+  // No normalizeBpmOctave here: it drags anything above 160 toward 120, which
+  // halved genuinely fast tracks (175 became 87.5). It predates the
+  // sub-harmonic penalty inside estimateBpmFromOnsets, which resolves the
+  // octave properly, so applying both makes the result worse.
+  const priorBpm = estimateBpmFromOnsets(onsets, ENV_FPS).bpm;
+  const dpTracked = ellisBeatTrackFor(downsampled, ANALYSIS_RATE, priorBpm);
+  const ironed = makeConstBpm(dpTracked.beats);
+
+  const audioBpm = ironed?.bpm ?? priorBpm;
+  const audioBeats = ironed ? dpTracked.beats : v2.beats;
+  const audioConfidence = ironed
+    ? Math.max(v2.bpmConfidence, Math.min(1, ironed.coverage))
+    : v2.bpmConfidence;
+
+  const named = input.nameHint ? bpmFromName(input.nameHint) : null;
+  const reconciled = reconcileBpm(named, { bpm: audioBpm, confidence: audioConfidence });
+
+  const bpm = input.serato ? input.serato.bpm : reconciled.bpm;
   const bpmConfidence = input.serato ? 1 : reconciled.confidence;
 
   // Beat grid — prefer real beats from the v2 tracker over a synthetic grid.
@@ -85,9 +108,16 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
     beats = grid.beats;
     downbeats = grid.downbeats;
-  } else if (v2.beats.length >= 16) {
-    firstBeatTime = v2.beats[0];
-    beats = v2.beats;
+  } else if (ironed && bpm === audioBpm) {
+    // Ironed tempo won: rebuild a clean grid on its phase so the grid and
+    // the tempo agree exactly.
+    firstBeatTime = ironed.firstBeat;
+    const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
+    beats = grid.beats;
+    downbeats = grid.downbeats;
+  } else if (audioBeats.length >= 16) {
+    firstBeatTime = audioBeats[0];
+    beats = audioBeats;
     // Assume 4/4; every 4th beat = downbeat
     downbeats = beats.filter((_, i) => i % 4 === 0);
   } else {

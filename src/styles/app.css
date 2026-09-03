@@ -1707,3 +1707,12 @@ input[type="text"] {
   outline: 2px dashed rgba(255, 255, 255, 0.9);
   outline-offset: -2px;
 }
+
+/* A refused sync explains itself rather than looking like a dead button. */
+.deckp-syncnote {
+  font-size: 11px;
+  color: #ffd76a;
+  background: rgba(255, 215, 106, 0.12);
+  border-radius: 6px;
+  padding: 5px 9px;
+}

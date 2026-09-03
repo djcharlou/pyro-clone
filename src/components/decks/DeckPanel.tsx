@@ -18,6 +18,11 @@ interface Props {
   onPitchChange(percent: number): void;
   onNudge(delta: number): void;
   onLoadFromQueue(): void;
+  onSync(): void;
+  /** Set when the last sync attempt was refused, e.g. tempo gap too wide. */
+  syncNote?: string | null;
+  /** True while this deck is stretched to follow the other. */
+  synced?: boolean;
 }
 
 const ACCENT: Record<'A' | 'B', string> = { A: '#ff9d4d', B: '#5fd3d0' };
@@ -33,6 +38,9 @@ export function DeckPanel({
   onPitchChange,
   onNudge,
   onLoadFromQueue,
+  onSync,
+  syncNote = null,
+  synced = false,
 }: Props): JSX.Element {
   const playing = deck?.isPlaying ?? false;
   const position = deck?.positionSec() ?? 0;
@@ -110,7 +118,17 @@ export function DeckPanel({
         />
       </div>
 
+      {syncNote && <div className="deckp-syncnote">{syncNote}</div>}
+
       <div className="deckp-transport">
+        <button
+          className={`deckp-btn ${synced ? 'deckp-btn--on' : ''}`}
+          onClick={onSync}
+          disabled={!track}
+          title="Match this deck's tempo and beat phase to the other deck"
+        >
+          SYNC
+        </button>
         <button className="deckp-btn" onClick={onCue} disabled={!track} title="Jump to the mix-in point">
           CUE
         </button>

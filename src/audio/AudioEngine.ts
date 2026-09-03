@@ -302,6 +302,99 @@ export class AudioEngine {
   }
 
   /**
+   * Match one deck's tempo — and optionally its beat phase — to the other.
+   *
+   * This is what a SYNC button does on a CDJ: instead of hunting the pitch
+   * fader until the two kicks line up, take the target deck's tempo, work
+   * out the ratio, and apply it. Phase alignment then nudges the follower so
+   * its next downbeat lands on the leader's.
+   *
+   * Returns what it did so the UI can report honestly, including refusing
+   * when the tempo gap is too wide for playbackRate to bridge without
+   * obvious pitching.
+   */
+  syncDeck(
+    followerSide: DeckId,
+    opts: { matchPhase?: boolean; maxStretch?: number } = {}
+  ): {
+    ok: boolean;
+    reason?: string;
+    ratio?: number;
+    followerBpm?: number;
+    leaderBpm?: number;
+  } {
+    const follower = this.getDeck(followerSide);
+    const leader = this.getDeck(followerSide === 'A' ? 'B' : 'A');
+    if (!follower.track) return { ok: false, reason: 'No track on this deck' };
+    if (!leader.track) return { ok: false, reason: 'No track on the other deck' };
+
+    const leaderBpm = leader.bpm * leader.getStretchRatio();
+    const followerBpm = follower.bpm;
+    if (!(leaderBpm > 0) || !(followerBpm > 0)) {
+      return { ok: false, reason: 'Missing tempo analysis' };
+    }
+
+    // Fold the ratio into the nearest octave so 70 can follow 140.
+    let ratio = leaderBpm / followerBpm;
+    while (ratio > 1.4) ratio /= 2;
+    while (ratio < 0.7) ratio *= 2;
+
+    const maxStretch = opts.maxStretch ?? 0.08;
+    if (Math.abs(ratio - 1) > maxStretch) {
+      return {
+        ok: false,
+        reason: `Tempo gap too wide (${Math.round((ratio - 1) * 100)}%)`,
+        ratio,
+        followerBpm,
+        leaderBpm,
+      };
+    }
+
+    follower.setStretchRatio(ratio);
+
+    if (opts.matchPhase !== false) this.alignPhase(followerSide);
+
+    return { ok: true, ratio, followerBpm: followerBpm * ratio, leaderBpm };
+  }
+
+  /**
+   * Slide the follower so its beat grid lines up with the leader's.
+   *
+   * Both decks keep playing; the follower is restarted a fraction of a beat
+   * away from where it was, which is the shortest move that puts the two
+   * grids in phase.
+   */
+  alignPhase(followerSide: DeckId): boolean {
+    const follower = this.getDeck(followerSide);
+    const leader = this.getDeck(followerSide === 'A' ? 'B' : 'A');
+    if (!follower.track || !leader.track || !follower.isPlaying) return false;
+
+    const leaderGrid = leader.track.analysis?.beatGrid;
+    const followerGrid = follower.track.analysis?.beatGrid;
+    if (!leaderGrid || !followerGrid) return false;
+
+    const leaderBeat = 60 / (leaderGrid.bpm || 120);
+    const followerBeat = (60 / (followerGrid.bpm || 120)) / follower.getStretchRatio();
+
+    // Where each deck sits within its own bar, as a fraction of a beat.
+    const leaderPhase = phaseWithin(leader.positionSec() - leaderGrid.firstBeatTime, leaderBeat);
+    const followerPhase = phaseWithin(
+      follower.positionSec() - followerGrid.firstBeatTime / follower.getStretchRatio(),
+      followerBeat
+    );
+
+    // Shortest signed correction, in follower seconds.
+    let delta = (leaderPhase - followerPhase) * followerBeat;
+    if (delta > followerBeat / 2) delta -= followerBeat;
+    if (delta < -followerBeat / 2) delta += followerBeat;
+
+    const target = follower.positionSec() - delta;
+    if (target < 0 || target >= follower.duration) return false;
+    follower.play(target);
+    return true;
+  }
+
+  /**
    * Switch between auto-mix gain staging and hands-on control.
    *
    * The automatic fade owns each deck's `gain` node, and it parks the
@@ -352,4 +445,11 @@ export class AudioEngine {
   setMasterVolume(v: number): void {
     this.master.gain.value = Math.max(0, Math.min(1, v));
   }
+}
+
+/** Position within one beat, as a 0..1 fraction. */
+function phaseWithin(elapsedSec: number, beatSec: number): number {
+  if (!(beatSec > 0) || !Number.isFinite(elapsedSec)) return 0;
+  const m = (elapsedSec % beatSec) / beatSec;
+  return m < 0 ? m + 1 : m;
 }

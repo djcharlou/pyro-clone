@@ -33,6 +33,19 @@ export function DecksView({
   // staying far cheaper than requestAnimationFrame on a canvas this size.
   const [tick, setTick] = useState(0);
   const [crossfader, setCrossfader] = useState(() => engine?.getCrossfader() ?? 0);
+  // Why a sync attempt was refused, per deck — shown next to the button so
+  // a no-op is explained rather than silent.
+  const [syncNote, setSyncNote] = useState<{ A: string | null; B: string | null }>({ A: null, B: null });
+
+  function handleSync(side: 'A' | 'B'): void {
+    const r = engine?.syncDeck(side);
+    if (!r) return;
+    setSyncNote((prev) => ({ ...prev, [side]: r.ok ? null : r.reason ?? 'Sync unavailable' }));
+    if (r.ok) {
+      // Clear any stale note on the other deck too; the pair is in step now.
+      setSyncNote({ A: null, B: null });
+    }
+  }
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((n) => n + 1), 50);
@@ -72,6 +85,9 @@ export function DecksView({
         onPitchChange={(p) => deckA?.setPitchPercent(p)}
         onNudge={(d) => deckA?.nudge(d)}
         onLoadFromQueue={() => onLoadNext('A')}
+        onSync={() => handleSync('A')}
+        syncNote={syncNote.A}
+        synced={Math.abs((deckA?.getStretchRatio() ?? 1) - 1) > 0.0005}
       />
 
       <Mixer
@@ -99,6 +115,9 @@ export function DecksView({
         onPitchChange={(p) => deckB?.setPitchPercent(p)}
         onNudge={(d) => deckB?.nudge(d)}
         onLoadFromQueue={() => onLoadNext('B')}
+        onSync={() => handleSync('B')}
+        syncNote={syncNote.B}
+        synced={Math.abs((deckB?.getStretchRatio() ?? 1) - 1) > 0.0005}
       />
     </div>
   );
