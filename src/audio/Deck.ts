@@ -38,6 +38,12 @@ export class Deck {
   }> = [];
   /** Rate the current source was started at, before any scheduled ramp. */
   private rateAtStart = 1;
+  /**
+   * Set when the user paused, so the position is held for resume() and the
+   * auto-mix can tell "the user stopped this" apart from "nothing loaded".
+   */
+  private paused = false;
+  private pausedAt = 0;
   track: AnalyzedTrack | null = null;
 
   constructor(ctx: AudioContext, id: DeckId, listeners: DeckListeners = {}) {
@@ -90,6 +96,8 @@ export class Deck {
     this.buffer = decoded;
     this.track = track;
     this.stretchRatio = 1;
+    this.paused = false;
+    this.pausedAt = 0;
     // LUFS-driven output gain — only ATTENUATE loud tracks toward target.
     // Never boost (positive dB would clip during the crossfade sum since
     // both decks briefly sit at ~0.7 gain).
@@ -228,6 +236,7 @@ export class Deck {
   play(offsetSec = 0): void {
     if (!this.buffer) return;
     this.stop();
+    this.paused = false;
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
     src.playbackRate.value = this.stretchRatio;
@@ -251,6 +260,7 @@ export class Deck {
   scheduleStart(ctxTime: number, offsetSec = 0): void {
     if (!this.buffer) return;
     this.stop();
+    this.paused = false;
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
     src.playbackRate.value = this.stretchRatio;
@@ -269,6 +279,32 @@ export class Deck {
     this.bufferStartOffset = offsetSec;
     this.playing = true;
     this.listeners.onPlay?.();
+  }
+
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  /**
+   * Hold playback at the current position.
+   *
+   * AudioBufferSourceNode cannot be paused — it can only be stopped, and a
+   * stopped node cannot restart. So we record where we were and tear the
+   * node down; resume() builds a fresh one from that offset.
+   */
+  pause(): void {
+    if (!this.playing) return;
+    this.pausedAt = this.positionSec();
+    this.stop();
+    this.paused = true;
+    this.bufferStartOffset = this.pausedAt;
+  }
+
+  /** Continue from where pause() left off. */
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.play(this.pausedAt);
   }
 
   stop(): void {

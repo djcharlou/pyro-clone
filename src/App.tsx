@@ -353,6 +353,10 @@ export function App(): JSX.Element {
     // kick things off automatically. Also covers the "track ended without
     // a crossfade because auto-mix couldn't schedule one in time" case.
     if (!active.track || !active.isPlaying) {
+      // A deliberate pause is not "nothing is playing" — without this the
+      // 500ms auto-mix tick restarts playback and pause appears to do
+      // nothing at all.
+      if (active.isPaused) return;
       if (loadingNextRef.current) return;
       loadingNextRef.current = true;
       try {
@@ -567,9 +571,20 @@ export function App(): JSX.Element {
     if (!engine) return;
     const active = engine.getActive();
     if (active.track) {
-      if (active.isPlaying) active.stop();
-      else {
-        engine.playActive(0);
+      if (active.isPlaying) {
+        // Hold position instead of tearing the deck down, so pressing play
+        // again continues rather than restarting the track.
+        active.pause();
+        // Mid-crossfade both decks are audible; pausing one alone would
+        // leave the incoming track playing on its own.
+        const other = engine.getInactive();
+        if (other.isPlaying) other.pause();
+      } else if (active.isPaused) {
+        active.resume();
+        const other = engine.getInactive();
+        if (other.isPaused) other.resume();
+      } else {
+        engine.playActive(effectiveMixInPoint(active.track));
         pushHistory(active.track.id);
       }
     } else if (queueTracks.length > 0) {
