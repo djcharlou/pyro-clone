@@ -23,6 +23,7 @@ import { estimateKey } from './key';
 import { bpmFromName, reconcileBpm } from './bpmFromName';
 import { computeIntegratedLufs } from './loudness';
 import { detectBpmV2 } from './beatTrackerV2';
+import { computeSeratoOverview } from './seratoOverview';
 
 const ANALYSIS_RATE = 22050;
 const ENV_WINDOW = 256; // ~11ms @ 22050Hz
@@ -122,6 +123,11 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   // so the stereo image + full bandwidth are preserved for the meter.
   const loudness = computeIntegratedLufs(input.channels, input.sampleRate);
 
+  // Serato Overview — 240 × 16 waveform bytes, log-scaled amplitude per band.
+  // Computed once here so the tag writer can embed it without re-decoding.
+  const overviewBytes = computeSeratoOverview(downsampled, ANALYSIS_RATE);
+  const seratoOverviewB64 = bytesToBase64(overviewBytes);
+
   const quality = scoreQuality(bpmConfidence, isStable, key.confidence);
 
   return {
@@ -135,7 +141,14 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
     cues,
     waveform,
     loudness,
+    seratoOverviewB64,
   };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
 }
 
 function computeWaveformPeaks(samples: Float32Array, bins: number): WaveformPeaks {

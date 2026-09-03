@@ -61,6 +61,13 @@ export interface WaveformPeaks {
   values: number[];
 }
 
+/**
+ * Serato Overview GEOB payload as base64. 3842 bytes = 2-byte header + 240
+ * timesteps × 16 frequency bands (byte per band). Stored so the tag writer
+ * can embed it without re-decoding the audio.
+ */
+export type SeratoOverviewB64 = string;
+
 export interface Playlist {
   id: string;
   name: string;
@@ -97,6 +104,8 @@ export interface TrackAnalysis {
   waveform?: WaveformPeaks;
   loudness?: LoudnessInfo;
   autoCues?: AutoCue[];
+  /** Serato Overview GEOB bytes as base64 — ready to embed at tag-write time. */
+  seratoOverviewB64?: SeratoOverviewB64;
   /** Which service provided this analysis (default: our local DSP). */
   source?: 'local' | 'spotify';
   /** Spotify track URI (e.g. "spotify:track:xxx") if enriched from Spotify. */

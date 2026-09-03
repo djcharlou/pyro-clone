@@ -29,6 +29,8 @@ export interface TagEdits {
     cues?: SeratoCue[];
     trackColor?: number;
     bpmLocked?: boolean;
+    /** Base64-encoded Serato Overview payload — see analyzer/seratoOverview.ts */
+    overviewB64?: string;
   };
 }
 
@@ -136,7 +138,22 @@ function buildSeratoGeobFrames(s: NonNullable<TagEdits['serato']>): GeobFrame[] 
       cues: s.cues,
     }),
   });
+  if (s.overviewB64) {
+    frames.push({
+      mime: 'application/octet-stream',
+      filename: '',
+      description: 'Serato Overview',
+      data: base64ToBytes(s.overviewB64),
+    });
+  }
   return frames;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 export async function writeTagsBatch(

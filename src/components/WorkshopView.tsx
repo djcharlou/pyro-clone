@@ -105,6 +105,7 @@ export function WorkshopView(): JSX.Element {
               beats: a.beatGrid.beats,
               bpmLocked: true,
               trackColor: 0xffffff,
+              overviewB64: a.seratoOverviewB64,
             }
           : undefined;
         return {
