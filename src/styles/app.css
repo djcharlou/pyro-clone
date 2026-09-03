@@ -1691,3 +1691,19 @@ input[type="text"] {
   color: rgba(255, 255, 255, 0.42);
   line-height: 1.35;
 }
+
+/* Reorder grip: pointer-driven (WKWebView does not do HTML5 drag), so it
+   needs its own hit area and must not let the OS start a text selection. */
+.qcard-grip {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  padding: 6px 4px;
+  margin: -6px -2px -6px -4px;
+}
+.qcard-grip:active { cursor: grabbing; }
+.qcard--dragging { opacity: 0.4; }
+.qcard--drop {
+  outline: 2px dashed rgba(255, 255, 255, 0.9);
+  outline-offset: -2px;
+}

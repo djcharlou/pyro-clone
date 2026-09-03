@@ -8,12 +8,12 @@ interface Props {
   onMoveUp?(): void;
   onMoveDown?(): void;
   onPlayNow?(): void;
-  /** HTML5 drag props (desktop). */
-  draggable?: boolean;
-  onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDragOver?: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDrop?: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd?: (e: React.DragEvent<HTMLDivElement>) => void;
+  /**
+   * Reordering uses pointer events rather than HTML5 drag-and-drop:
+   * WKWebView (which Tauri uses on macOS) does not fire the HTML5 drag
+   * events reliably, and pointer events work on touch as well.
+   */
+  onGripPointerDown?: (e: React.PointerEvent<HTMLElement>) => void;
   isDropTarget?: boolean;
   isDragging?: boolean;
   /** On the active deck right now. */
@@ -29,11 +29,7 @@ export function QueueCard({
   onMoveUp,
   onMoveDown,
   onPlayNow,
-  draggable,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
+  onGripPointerDown,
   isDropTarget,
   isDragging,
   isPlaying,
@@ -54,7 +50,7 @@ export function QueueCard({
 
   const classes = [
     'qcard',
-    draggable ? 'qcard--draggable' : '',
+    onGripPointerDown ? 'qcard--draggable' : '',
     isDragging ? 'qcard--dragging' : '',
     isDropTarget ? 'qcard--drop' : '',
     isPlaying ? 'qcard--playing' : '',
@@ -65,13 +61,18 @@ export function QueueCard({
     <div
       className={classes}
       style={{ background: cardBg }}
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
     >
-      {draggable && <span className="qcard-grip" aria-hidden="true">⋮⋮</span>}
+      {onGripPointerDown && (
+        <span
+          className="qcard-grip"
+          onPointerDown={onGripPointerDown}
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+          role="button"
+        >
+          ⋮⋮
+        </span>
+      )}
       <div className="qcard-cover">
         {track.coverArtDataUrl ? (
           <img src={track.coverArtDataUrl} alt="" loading="lazy" />

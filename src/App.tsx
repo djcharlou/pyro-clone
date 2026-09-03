@@ -188,10 +188,12 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!autoMix) return;
+    // Manual mixing owns the decks in the Decks view — an auto transition
+    // firing over the user's fader moves would be actively hostile.
+    if (!autoMix || view === 'decks') return;
     const id = window.setInterval(() => void maybeStartAutoTransition(), 500);
     return () => window.clearInterval(id);
-  }, [autoMix, tracks, session, queue]);
+  }, [autoMix, tracks, session, queue, view]);
 
   const tracksById = useMemo(() => {
     const m = new Map<string, AnalyzedTrack>();

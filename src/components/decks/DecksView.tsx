@@ -39,6 +39,15 @@ export function DecksView({
     return () => window.clearInterval(id);
   }, []);
 
+  // Hand the mix to the faders while this view is open, and give it back on
+  // the way out. Without this the auto-fade's gain staging keeps the
+  // inactive deck muted and the channel fader / crossfader do nothing.
+  useEffect(() => {
+    engine?.setManualMode(true);
+    setCrossfader(engine?.getCrossfader() ?? 0);
+    return () => engine?.setManualMode(false);
+  }, [engine]);
+
   const deckA = engine?.deckA ?? null;
   const deckB = engine?.deckB ?? null;
   const activeId = engine?.getActiveId() ?? 'A';

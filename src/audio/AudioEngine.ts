@@ -23,6 +23,8 @@ export class AudioEngine {
   private transitionTimer: number | null = null;
   /** Last manual crossfader position, -1 (A) .. +1 (B). */
   private crossfaderPosition = 0;
+  /** True while the Decks view owns the mix instead of the auto-fade. */
+  private manualMode = false;
 
   constructor(listeners: EngineListeners = {}) {
     this.listeners = listeners;
@@ -97,12 +99,16 @@ export class AudioEngine {
   playActive(offsetSec = 0): void {
     void this.ensureRunning();
     const d = this.getActive();
-    if (this.activeDeck === 'A') {
-      this.deckA.gain.gain.value = 1;
-      this.deckB.gain.gain.value = 0;
-    } else {
-      this.deckA.gain.gain.value = 0;
-      this.deckB.gain.gain.value = 1;
+    // In manual mode the user's faders own the levels; forcing the gains
+    // here would mute whichever deck they are mixing in.
+    if (!this.manualMode) {
+      if (this.activeDeck === 'A') {
+        this.deckA.gain.gain.value = 1;
+        this.deckB.gain.gain.value = 0;
+      } else {
+        this.deckA.gain.gain.value = 0;
+        this.deckB.gain.gain.value = 1;
+      }
     }
     d.play(offsetSec);
   }
@@ -293,6 +299,37 @@ export class AudioEngine {
   hardSwitch(): void {
     this.activeDeck = this.activeDeck === 'A' ? 'B' : 'A';
     this.listeners.onDeckUpdate?.();
+  }
+
+  /**
+   * Switch between auto-mix gain staging and hands-on control.
+   *
+   * The automatic fade owns each deck's `gain` node, and it parks the
+   * inactive deck at 0 — which silently defeats the manual channel fader
+   * and crossfader downstream of it. In manual mode both auto-fade gains
+   * sit at unity and the level is owned entirely by volume × crossfader.
+   */
+  setManualMode(on: boolean): void {
+    this.manualMode = on;
+    const now = this.ctx.currentTime;
+    if (on) {
+      this.deckA.gain.gain.setTargetAtTime(1, now, 0.02);
+      this.deckB.gain.gain.setTargetAtTime(1, now, 0.02);
+      // Re-apply the crossfader so its current position takes effect
+      // immediately rather than waiting for the next drag.
+      this.setCrossfader(this.crossfaderPosition);
+    } else {
+      // Hand the mix back to the auto-fade: active deck open, other closed,
+      // crossfader neutralised so it cannot attenuate anything.
+      this.deckA.setCrossfadeGain(1);
+      this.deckB.setCrossfadeGain(1);
+      this.deckA.gain.gain.setTargetAtTime(this.activeDeck === 'A' ? 1 : 0, now, 0.02);
+      this.deckB.gain.gain.setTargetAtTime(this.activeDeck === 'B' ? 1 : 0, now, 0.02);
+    }
+  }
+
+  isManualMode(): boolean {
+    return this.manualMode;
   }
 
   /**
