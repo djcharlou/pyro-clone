@@ -59,8 +59,10 @@ input[type="text"] {
   height: 100dvh;
   max-width: 540px;
   margin: 0 auto;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  /* Flex column: each section takes its natural height, main scrolls.
+     Grid was clipping NowPlaying when its rows ran out of space. */
+  display: flex;
+  flex-direction: column;
   position: relative;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
@@ -71,7 +73,11 @@ input[type="text"] {
   align-items: center;
   justify-content: space-between;
   padding: 12px 18px 8px;
+  flex-shrink: 0;
 }
+.hud { flex-shrink: 0; }
+.now-playing { flex-shrink: 0; }
+.status-bar { flex-shrink: 0; }
 .app-brand {
   display: flex;
   align-items: center;
@@ -386,8 +392,14 @@ input[type="text"] {
   background: rgba(0, 0, 0, 0.22);
   border-bottom: 1px solid rgba(0, 0, 0, 0.18);
   position: relative;
-  overflow: hidden;
+  /* overflow: visible so the whole card is rendered even when grid row
+     tries to squeeze it — the backdrop is behind (z-index: -1) so it
+     doesn't matter if it bleeds slightly. */
   isolation: isolate;
+}
+.np-backdrop {
+  border-radius: inherit;
+  overflow: hidden;
 }
 .np-backdrop {
   position: absolute;
@@ -659,6 +671,8 @@ input[type="text"] {
 /* === MAIN / QUEUE ========================================================== */
 
 .main {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 14px 14px 100px;
@@ -1133,6 +1147,16 @@ input[type="text"] {
   background: rgba(255, 255, 255, 0.15);
   color: #fff;
 }
+.workshop-tab--danger {
+  background: rgba(255, 100, 100, 0.15);
+  color: #ff9a9a;
+}
+.workshop-tab--danger:hover:not(:disabled) {
+  background: rgba(255, 100, 100, 0.3);
+  color: #fff;
+}
+.workshop-tab--danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.workshop-tabs { display: flex; }
 
 /* Library table */
 .lib-wrap {

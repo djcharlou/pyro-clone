@@ -141,6 +141,16 @@ export function WorkshopView(): JSX.Element {
     setWriting(false);
   }
 
+  async function handleClearLibrary(): Promise<void> {
+    const n = tracks.length;
+    if (n === 0) return;
+    if (!confirm(`Effacer la library entière (${n} tracks) ?\n\nÇa retire les tracks + leurs analyses + les file handles de pyro-clone. Les fichiers audio sur ton disque restent intacts.`)) return;
+    await store.clearAll();
+    useStore.getState().setTracks([]);
+    useStore.getState().setQueue([]);
+    setSelection(new Set());
+  }
+
   return (
     <div className="workshop">
       <div className="workshop-tabs">
@@ -155,6 +165,15 @@ export function WorkshopView(): JSX.Element {
           onClick={() => setTab('dupes')}
         >
           Duplicates
+        </button>
+        <button
+          className="workshop-tab workshop-tab--danger"
+          onClick={() => void handleClearLibrary()}
+          disabled={tracks.length === 0}
+          title="Effacer toutes les tracks de pyro-clone (les fichiers audio restent)"
+          style={{ marginLeft: 'auto' }}
+        >
+          🗑 Clear library
         </button>
       </div>
 
