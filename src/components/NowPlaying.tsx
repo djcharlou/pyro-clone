@@ -14,18 +14,34 @@ interface Props {
   onNextRecommended?(): void;
   onSeekFraction(x: number): void;
 
-  /** Second deck info — shown ONLY when it is currently playing (mid-mix). */
   nextTrack?: AnalyzedTrack | null;
   nextPositionSec?: number;
   nextDurationSec?: number;
   nextIsPlaying?: boolean;
   nextStretchRatio?: number;
 
-  /** Seconds until the auto-mix fade starts (null if not armed). */
   autoMixInSec?: number | null;
   autoMixOn?: boolean;
 }
 
+/**
+ * Redesigned NowPlaying — waveform is the visual hero, always at the top,
+ * always full-width, always visible. Meta info + controls flow below.
+ *
+ * Layout:
+ *   ┌────────────────────────────────────────┐
+ *   │              WAVEFORM (100px)          │  ← scrubs, playhead, hover
+ *   │  0:12   ⚡ mix in 2:14         −3:24    │
+ *   ├────────────────────────────────────────┤
+ *   │  [cover] 083 – Village People – YMCA  │
+ *   │          Unknown Artist               │
+ *   │          126 BPM  ·  2A  ·  7/10      │
+ *   │                                        │
+ *   │  ────  [❚❚]     [▶▶]     ────         │
+ *   │        Play      Skip                 │
+ *   │  ┌ Mix now ┐  ┌ Next best match ┐     │
+ *   └────────────────────────────────────────┘
+ */
 export function NowPlaying({
   track,
   playing,
@@ -53,7 +69,6 @@ export function NowPlaying({
     ? Math.max(0, Math.min(1, nextPositionSec / nextDurationSec))
     : 0;
   const inMix = !!nextTrack && nextIsPlaying;
-
   const coverUrl = track?.coverArtDataUrl;
 
   return (
@@ -65,86 +80,75 @@ export function NowPlaying({
           aria-hidden="true"
         />
       )}
-      <div className="np-body">
-        <div className="np-hero">
-          <div className={`np-cover ${playing ? 'np-cover--playing' : ''}`}>
-            {coverUrl ? (
-              <img src={coverUrl} alt="" />
-            ) : (
-              <div className="np-cover-fallback">♪</div>
-            )}
-          </div>
-          <div className="np-text">
-            <div className="np-title">{track?.title ?? 'No track playing'}</div>
-            <div className="np-artist">{track?.artist ?? '—'}</div>
-            {track?.analysis && (
-              <div className="np-chips">
-                <span className="np-chip np-chip--bpm">
-                  {(effectiveBpm ?? track.analysis.beatGrid.bpm).toFixed(0)} BPM
-                  {Math.abs(stretchRatio - 1) > 0.001 && (
-                    <span className="np-stretch"> ({stretchRatio > 1 ? '+' : ''}{((stretchRatio - 1) * 100).toFixed(1)}%)</span>
-                  )}
-                </span>
-                <span className="np-chip np-chip--key">{track.analysis.key.camelot}</span>
-                <span className="np-chip">{Math.round(track.analysis.energy.mean * 10)}/10</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
-      <div className="np-waveform-wrap">
+      {/* ---- Waveform (always visible, always at top) --------------------- */}
+      <div className="np-wave-region">
         <Waveform
           peaks={track?.analysis?.waveform}
           progress={progress}
-          height={inMix ? 46 : 72}
-          playedColor="rgba(255,255,255,0.95)"
-          remainingColor="rgba(255,255,255,0.35)"
+          height={inMix ? 78 : 110}
+          playedColor="#ffffff"
+          remainingColor="rgba(255,255,255,0.4)"
           onScrub={track ? onSeekFraction : undefined}
         />
+        <div className="np-times">
+          <span>{formatTime(positionSec)}</span>
+          {autoMixOn && autoMixInSec !== null && autoMixInSec > 0 && !inMix && (
+            <span className="np-countdown">⚡ mix in {formatCountdown(autoMixInSec)}</span>
+          )}
+          {inMix && <span className="np-mixing-badge">⇄ MIXING</span>}
+          <span>-{formatTime(Math.max(0, durationSec - positionSec))}</span>
+        </div>
       </div>
 
-      <div className="np-times">
-        <span>{formatTime(positionSec)}</span>
-        {autoMixOn && autoMixInSec !== null && autoMixInSec > 0 && !inMix && (
-          <span className="np-countdown" title="Auto-mix starts in">
-            ⚡ mix in {formatCountdown(autoMixInSec)}
-          </span>
-        )}
-        {inMix && (
-          <span className="np-mixing-badge">
-            ⇄ MIXING
-          </span>
-        )}
-        <span>-{formatTime(Math.max(0, durationSec - positionSec))}</span>
-      </div>
-
+      {/* ---- Second deck waveform (only during a live mix) --------------- */}
       {inMix && nextTrack && (
-        <div className="np-next">
+        <div className="np-wave-region np-wave-region--next">
           <div className="np-next-head">
             <span className="np-next-label">NEXT</span>
             <span className="np-next-title">{nextTrack.title}</span>
-            <span className="np-next-artist">— {nextTrack.artist}</span>
             {nextTrack.analysis && (
               <span className="np-next-bpm">
-                {(nextTrack.analysis.beatGrid.bpm * nextStretchRatio).toFixed(0)} BPM
-                {' · '}
-                {nextTrack.analysis.key.camelot}
+                {(nextTrack.analysis.beatGrid.bpm * nextStretchRatio).toFixed(0)} BPM · {nextTrack.analysis.key.camelot}
               </span>
             )}
           </div>
-          <div className="np-waveform-wrap np-waveform-wrap--next">
-            <Waveform
-              peaks={nextTrack.analysis?.waveform}
-              progress={nextProgress}
-              height={40}
-              playedColor="rgba(127, 255, 157, 0.95)"
-              remainingColor="rgba(127, 255, 157, 0.35)"
-            />
-          </div>
+          <Waveform
+            peaks={nextTrack.analysis?.waveform}
+            progress={nextProgress}
+            height={60}
+            playedColor="#7fff9d"
+            remainingColor="rgba(127,255,157,0.35)"
+          />
         </div>
       )}
 
+      {/* ---- Track meta + cover ------------------------------------------ */}
+      <div className="np-info">
+        <div className={`np-cover ${playing ? 'np-cover--playing' : ''}`}>
+          {coverUrl ? <img src={coverUrl} alt="" /> : <div className="np-cover-fallback">♪</div>}
+        </div>
+        <div className="np-text">
+          <div className="np-title">{track?.title ?? 'No track playing'}</div>
+          <div className="np-artist">{track?.artist ?? '—'}</div>
+          {track?.analysis && (
+            <div className="np-chips">
+              <span className="np-chip np-chip--bpm">
+                {(effectiveBpm ?? track.analysis.beatGrid.bpm).toFixed(0)} BPM
+                {Math.abs(stretchRatio - 1) > 0.001 && (
+                  <span className="np-stretch">
+                    {' '}({stretchRatio > 1 ? '+' : ''}{((stretchRatio - 1) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
+              <span className="np-chip np-chip--key">{track.analysis.key.camelot}</span>
+              <span className="np-chip">{Math.round(track.analysis.energy.mean * 10)}/10</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ---- Transport --------------------------------------------------- */}
       <div className="np-transport">
         <button
           className="np-btn np-btn--secondary"
@@ -160,7 +164,7 @@ export function NowPlaying({
           onClick={onSkip}
           disabled={!track}
           aria-label="Skip to next"
-          title="Quick beat-matched fade to next (8 beats)"
+          title="Quick 8-beat beat-matched fade to next"
         >
           {NextIcon}
         </button>

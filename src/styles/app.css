@@ -488,6 +488,7 @@ input[type="text"] {
 .np-bpm { font-weight: 600; }
 .np-stretch { color: #ffd76a; font-weight: 700; }
 .np-key { font-weight: 600; }
+/* Legacy — kept in case any child still targets it */
 .np-waveform-wrap {
   margin: 4px 0;
   cursor: pointer;
@@ -497,6 +498,53 @@ input[type="text"] {
   overflow: hidden;
   width: 100%;
 }
+
+/* NEW LAYOUT — waveform region is a first-class block that owns its space */
+.np-wave-region {
+  width: 100%;
+  padding: 0;
+  margin: 0 0 10px;
+  background: rgba(0, 0, 0, 0.32);
+  border-radius: 8px;
+  overflow: hidden;
+  display: block;
+}
+.np-wave-region .waveform-wrap {
+  display: block;
+  width: 100%;
+}
+.np-wave-region--next {
+  margin-top: 8px;
+  background: rgba(127, 255, 157, 0.08);
+  border: 1px solid rgba(127, 255, 157, 0.25);
+}
+.np-info {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 10px 0 12px;
+}
+.np-next-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+.np-next-label {
+  background: #7fff9d;
+  color: #14161c;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+}
+.np-next-title { flex: 1; min-width: 0; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.np-next-bpm { font-variant-numeric: tabular-nums; color: rgba(255,255,255,0.65); font-weight: 500; }
 .np-times {
   display: flex;
   justify-content: space-between;
