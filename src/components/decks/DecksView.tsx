@@ -111,7 +111,10 @@ export function DecksView({
           onSync={() => handleSync(side)}
           onLoad={() => onLoadNext(side)}
           syncNote={notes?.[side] ?? syncNote[side]}
-          synced={Math.abs((deck?.getStretchRatio() ?? 1) - 1) > 0.0005}
+          // Ask the engine, not the ratio: two tracks already at the same
+          // tempo sync to a ratio of exactly 1, and reading the ratio would
+          // leave the button dark as if the press had done nothing.
+          synced={engine?.isSynced(side) ?? false}
         />
       </div>
     );
