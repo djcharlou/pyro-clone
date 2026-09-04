@@ -2,6 +2,14 @@ import type { AnalyzedTrack } from '@shared/types';
 
 export type DeckId = 'A' | 'B';
 
+/**
+ * Fade either side of a mid-playback splice.
+ *
+ * Long enough to kill the step discontinuity, short enough that neither the
+ * beat phase it was moved to nor the scrub position is perceptibly late.
+ */
+const SPLICE_SEC = 0.004;
+
 export interface DeckListeners {
   onPlay?: () => void;
   onStop?: () => void;
@@ -11,6 +19,15 @@ export interface DeckListeners {
 export class Deck {
   readonly id: DeckId;
   readonly gain: GainNode;
+  /**
+   * Sits between the source and the EQ purely to fade splices.
+   *
+   * Restarting a buffer mid-waveform — which is how both phase alignment and
+   * waveform scrubbing move the playhead — is a step discontinuity, and a
+   * step is a click. A few milliseconds of fade either side is inaudible as a
+   * fade and removes it.
+   */
+  readonly declick: GainNode;
   readonly lowEQ: BiquadFilterNode;
   readonly midEQ: BiquadFilterNode;
   readonly highEQ: BiquadFilterNode;
@@ -56,6 +73,9 @@ export class Deck {
     this.id = id;
     this.listeners = listeners;
 
+    this.declick = ctx.createGain();
+    this.declick.gain.value = 1;
+
     this.lowEQ = ctx.createBiquadFilter();
     this.lowEQ.type = 'lowshelf';
     this.lowEQ.frequency.value = 120;
@@ -89,7 +109,8 @@ export class Deck {
     this.output = ctx.createGain();
     this.output.gain.value = 1;
 
-    // source → EQ → HPF → auto-fade gain → channel fader → crossfader → out
+    // source → declick → EQ → HPF → auto-fade gain → channel fader → xfader → out
+    this.declick.connect(this.lowEQ);
     this.lowEQ
       .connect(this.midEQ)
       .connect(this.highEQ)
@@ -130,7 +151,25 @@ export class Deck {
    * Pitch changes with tempo (no proper time-stretch yet — that's Phase 4 full).
    * Stored across source recreations so it applies to scheduleStart() too.
    */
+  /**
+   * Set the playback rate, keeping the playhead where it is.
+   *
+   * positionSec() reads as `offset + elapsed × rate`, so changing the rate
+   * without moving the anchor rewrites the whole journey so far: a deck 60s
+   * into a track jumps to 63s the instant a 5% stretch is applied. SYNC does
+   * exactly that and then reads the position back to align beat phase, so
+   * without this re-anchor the alignment is computed from a position the
+   * deck was never at.
+   */
   setStretchRatio(ratio: number): void {
+    if (this.playing && this.source) {
+      // Read before the rate changes, or we sample the lie we are fixing.
+      const here = this.positionSec();
+      this.bufferStartOffset = here;
+      this.startedAtCtx = this.ctx.currentTime;
+      this.rateSegments = [];
+      this.rateAtStart = ratio;
+    }
     this.stretchRatio = ratio;
     if (this.source) {
       this.source.playbackRate.cancelScheduledValues(this.ctx.currentTime);
@@ -249,23 +288,46 @@ export class Deck {
 
   play(offsetSec = 0): void {
     if (!this.buffer) return;
-    this.stop();
+    const now = this.ctx.currentTime;
+    // Moving the playhead on a deck that is already running is a splice, not
+    // a start: cross-fade it over a few milliseconds. A cold start needs no
+    // fade and keeps its exact timing, which the auto-mix schedules against.
+    const splicing = this.playing && !!this.source;
+    const at = splicing ? now + SPLICE_SEC : now;
+    const g = this.declick.gain;
+
+    if (splicing) {
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(0, at);
+      this.scheduleStop(at);
+      // Hand the outgoing source off: its onended must not clear `playing`,
+      // which by then belongs to the incoming one.
+      this.source = null;
+      this.rateSegments = [];
+    } else {
+      this.stop();
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(1, now);
+    }
+
     this.paused = false;
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
     src.playbackRate.value = this.stretchRatio;
-    src.connect(this.lowEQ);
+    src.connect(this.declick);
     src.onended = () => {
       if (this.source === src) {
         this.playing = false;
         this.listeners.onStop?.();
       }
     };
-    src.start(0, offsetSec);
+    src.start(at, offsetSec);
+    if (splicing) g.linearRampToValueAtTime(1, at + SPLICE_SEC);
     this.source = src;
     this.rateSegments = [];
     this.rateAtStart = this.stretchRatio;
-    this.startedAtCtx = this.ctx.currentTime;
+    this.startedAtCtx = at;
     this.bufferStartOffset = offsetSec;
     this.playing = true;
     this.listeners.onPlay?.();
@@ -278,7 +340,7 @@ export class Deck {
     const src = this.ctx.createBufferSource();
     src.buffer = this.buffer;
     src.playbackRate.value = this.stretchRatio;
-    src.connect(this.lowEQ);
+    src.connect(this.declick);
     src.onended = () => {
       if (this.source === src) {
         this.playing = false;

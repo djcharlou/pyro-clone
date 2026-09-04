@@ -25,6 +25,8 @@ export class AudioEngine {
   private crossfaderPosition = 0;
   /** True while the Decks view owns the mix instead of the auto-fade. */
   private manualMode = false;
+  /** Decks whose tempo is currently owned by SYNC rather than by the user. */
+  private syncedSides = new Set<DeckId>();
 
   constructor(listeners: EngineListeners = {}) {
     this.listeners = listeners;
@@ -89,11 +91,16 @@ export class AudioEngine {
   }
 
   async loadIntoInactive(track: AnalyzedTrack, audio: ArrayBuffer): Promise<void> {
+    const side = this.getInactive().id;
     await this.getInactive().load(track, audio);
+    // load() resets the stretch ratio, so the sync that set it is void too.
+    this.syncedSides.delete(side);
   }
 
   async loadIntoActive(track: AnalyzedTrack, audio: ArrayBuffer): Promise<void> {
+    const side = this.getActive().id;
     await this.getActive().load(track, audio);
+    this.syncedSides.delete(side);
   }
 
   playActive(offsetSec = 0): void {
@@ -328,11 +335,16 @@ export class AudioEngine {
     if (!follower.track) return { ok: false, reason: 'No track on this deck' };
     if (!leader.track) return { ok: false, reason: 'No track on the other deck' };
 
-    const leaderBpm = leader.bpm * leader.getStretchRatio();
-    const followerBpm = follower.bpm;
-    if (!(leaderBpm > 0) || !(followerBpm > 0)) {
-      return { ok: false, reason: 'Missing tempo analysis' };
+    // Deck.bpm falls back to 120 for an unanalysed track, so testing it for
+    // positivity can never fail — an un-analysed deck would sync to a tempo
+    // nobody measured. Ask the analysis itself.
+    const leaderTagged = leader.track.analysis?.beatGrid.bpm;
+    const followerTagged = follower.track.analysis?.beatGrid.bpm;
+    if (!(leaderTagged! > 0) || !(followerTagged! > 0)) {
+      return { ok: false, reason: 'Missing tempo analysis — analyse the track first' };
     }
+    const leaderBpm = leaderTagged! * leader.getStretchRatio();
+    const followerBpm = followerTagged!;
 
     // Fold the ratio into the nearest octave so 70 can follow 140.
     let ratio = leaderBpm / followerBpm;
@@ -351,10 +363,39 @@ export class AudioEngine {
     }
 
     follower.setStretchRatio(ratio);
+    this.syncedSides.add(followerSide);
 
+    // A stopped deck has no phase to align — it acquires one when it starts,
+    // which is why `syncedSides` is remembered rather than aligning once and
+    // forgetting. See alignPhaseIfSynced.
     if (opts.matchPhase !== false) this.alignPhase(followerSide);
 
     return { ok: true, ratio, followerBpm: followerBpm * ratio, leaderBpm };
+  }
+
+  /** True while SYNC owns this deck's tempo. */
+  isSynced(side: DeckId): boolean {
+    return this.syncedSides.has(side);
+  }
+
+  /** Hand the deck back to the user — call when its pitch is set by hand. */
+  clearSync(side: DeckId): void {
+    this.syncedSides.delete(side);
+  }
+
+  /**
+   * Align a deck that was synced while stopped, at the moment it starts.
+   *
+   * Without this, pressing SYNC on a parked deck and then PLAY gives the
+   * right tempo and the wrong phase — the two tracks run at the same speed
+   * past each other, which is the failure people mean when they say sync
+   * does not work.
+   */
+  alignPhaseIfSynced(side: DeckId): boolean {
+    if (!this.syncedSides.has(side)) return false;
+    const other = this.getDeck(side === 'A' ? 'B' : 'A');
+    if (!other.isPlaying) return false;
+    return this.alignPhase(side);
   }
 
   /**
@@ -373,22 +414,28 @@ export class AudioEngine {
     const followerGrid = follower.track.analysis?.beatGrid;
     if (!leaderGrid || !followerGrid) return false;
 
+    // Everything here is in each track's own seconds: positionSec() and
+    // play() are buffer offsets, and firstBeatTime is a point inside the
+    // track. The stretch ratio must not appear — it describes how fast those
+    // seconds are consumed, which is already settled by the tempo match, and
+    // scaling by it mixes real time into a track-time calculation.
     const leaderBeat = 60 / (leaderGrid.bpm || 120);
-    const followerBeat = (60 / (followerGrid.bpm || 120)) / follower.getStretchRatio();
+    const followerBeat = 60 / (followerGrid.bpm || 120);
 
-    // Where each deck sits within its own bar, as a fraction of a beat.
+    // Where each deck sits within its own beat, as a fraction of one.
     const leaderPhase = phaseWithin(leader.positionSec() - leaderGrid.firstBeatTime, leaderBeat);
     const followerPhase = phaseWithin(
-      follower.positionSec() - followerGrid.firstBeatTime / follower.getStretchRatio(),
+      follower.positionSec() - followerGrid.firstBeatTime,
       followerBeat
     );
 
-    // Shortest signed correction, in follower seconds.
-    let delta = (leaderPhase - followerPhase) * followerBeat;
-    if (delta > followerBeat / 2) delta -= followerBeat;
-    if (delta < -followerBeat / 2) delta += followerBeat;
+    // Shortest way round the beat. Moving the follower *forward* by this
+    // fraction is what raises its phase to the leader's.
+    let deltaBeats = leaderPhase - followerPhase;
+    if (deltaBeats > 0.5) deltaBeats -= 1;
+    if (deltaBeats < -0.5) deltaBeats += 1;
 
-    const target = follower.positionSec() - delta;
+    const target = follower.positionSec() + deltaBeats * followerBeat;
     if (target < 0 || target >= follower.duration) return false;
     follower.play(target);
     return true;

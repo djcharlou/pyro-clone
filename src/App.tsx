@@ -734,6 +734,8 @@ export function App(): JSX.Element {
     if (deck.isPlaying) deck.pause();
     else if (deck.isPaused) deck.resume();
     else deck.play(effectiveMixInPoint(deck.track));
+    // A deck synced while parked only gets a phase when it starts.
+    if (deck.isPlaying) engineRef.current?.alignPhaseIfSynced(side);
     forceUpdate((x) => x + 1);
   }
 
@@ -775,6 +777,9 @@ export function App(): JSX.Element {
       note('Could not decode this file.');
       return;
     }
+    // A new track has its own tempo; whatever SYNC decided was about the old
+    // one. load() resets the stretch ratio, so the flag must go with it.
+    engineRef.current?.clearSync(side);
     note(null);
     forceUpdate((x) => x + 1);
   }
