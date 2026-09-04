@@ -78,6 +78,12 @@ export function App(): JSX.Element {
   const [enrichmentBusy, setEnrichmentBusy] = useState(false);
   const [enrichmentStatus, setEnrichmentStatus] = useState('');
   const [playbackBridge, setPlaybackBridge] = useState<PlayerBridge | null>(null);
+  // A deck that refuses a track has to say so. Silently doing nothing is how a
+  // moved file or a stale handle turns into "the button doesn't work".
+  const [deckNote, setDeckNote] = useState<{ A: string | null; B: string | null }>({
+    A: null,
+    B: null,
+  });
   // Whether a track leaves the queue once it has played. Off by default:
   // the queue reads as a playlist you can replay from. Persisted so the
   // choice survives a restart.
@@ -752,14 +758,24 @@ export function App(): JSX.Element {
     const deck = deckFor(side);
     const track = tracksById.get(trackId);
     if (!deck || !track) return;
+    const note = (msg: string | null): void => setDeckNote((p) => ({ ...p, [side]: msg }));
     const buffer = await loadAudioBuffer(track);
-    if (!buffer) return;
+    if (!buffer) {
+      note(
+        isTauri()
+          ? 'File not found — it may have moved since it was imported.'
+          : 'No file handle — re-import the folder to grant access again.'
+      );
+      return;
+    }
     try {
       await deck.load(track, buffer);
     } catch (err) {
       console.error('[decks] load failed', track.title, err);
+      note('Could not decode this file.');
       return;
     }
+    note(null);
     forceUpdate((x) => x + 1);
   }
 
@@ -1039,6 +1055,7 @@ export function App(): JSX.Element {
             tracks={tracks}
             onLoadNext={(side) => void handleDeckLoad(side)}
             onLoadTrack={(side, id) => void handleDeckLoadTrack(side, id)}
+            notes={deckNote}
             onSeek={handleDeckSeek}
             onCue={handleDeckCue}
             onPlayPause={handleDeckPlayPause}

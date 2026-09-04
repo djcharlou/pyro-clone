@@ -1863,6 +1863,37 @@ input[type="text"] {
 .mixdesk .knob-label, .mixdesk .fader-label { color: rgba(232,234,240,0.45); }
 .mixdesk .knob-value, .mixdesk .fader-value { color: rgba(232,234,240,0.8); }
 
+/* ---- Narrow screens ------------------------------------------------------
+   The desk is a three-column instrument and a phone has one column, so it
+   stacks. The mixer has to be re-laid rather than just stacked: as a column
+   it is taller than both decks put together, which buries the waveforms and
+   the library. Turned on its side it costs two short rows. */
+@media (max-width: 720px) {
+  .mixdesk-top { grid-template-columns: 1fr; }
+  .mixdesk-center { padding: 10px 12px 14px; gap: 10px; }
+  .mixdesk-center-head { align-self: flex-start; }
+  .mixdesk-eqs { flex-direction: column; gap: 10px; width: 100%; }
+  .mixdesk-eqcol {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    gap: 10px;
+  }
+  /* The channel fader reads as a level, so keep it vertical but short.
+     !important because Fader sets its length inline; the drag maths reads the
+     real box via getBoundingClientRect, so resizing in CSS stays correct. */
+  .mixdesk-eqcol .fader--vertical .fader-track { height: 54px !important; }
+  .mixdesk-xfader, .mixdesk-xfader-ends { width: 100%; }
+  /* The wrapper needs the width too, or the track's 100% resolves against a
+     shrink-to-fit parent and the crossfader collapses to a stub. */
+  .mixdesk-xfader .fader--horizontal { width: 100%; }
+  .mixdesk-xfader .fader--horizontal .fader-track { width: 100% !important; }
+  /* Waveforms stay tall enough to read; the library keeps the rest. */
+  .lib2-bar { flex-wrap: wrap; row-gap: 6px; }
+  .lib2-search { min-width: 130px; }
+  .lib2-ellipsis { max-width: 130px; }
+}
+
 /* ---- Library ------------------------------------------------------------- */
 
 .lib2 {

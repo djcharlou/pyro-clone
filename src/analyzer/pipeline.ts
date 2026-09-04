@@ -97,36 +97,27 @@ export function analyzeTrack(input: AnalyzeInput): TrackAnalysis {
   const bpm = input.serato ? input.serato.bpm : reconciled.bpm;
   const bpmConfidence = input.serato ? 1 : reconciled.confidence;
 
-  // Beat grid — prefer real beats from the v2 tracker over a synthetic grid.
-  //   1. Serato anchor if present (exact),
-  //   2. else the v2 tracker's actual beat positions,
-  //   3. else fall back to synthesized grid from firstBeat + period.
-  let beats: number[];
-  let downbeats: number[];
-  let firstBeatTime: number;
-  if (input.serato) {
-    firstBeatTime = input.serato.firstBeatSec;
-    const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
-    beats = grid.beats;
-    downbeats = grid.downbeats;
-  } else if (ironed && bpm === audioBpm) {
-    // Ironed tempo won: rebuild a clean grid on its phase so the grid and
-    // the tempo agree exactly.
-    firstBeatTime = ironed.firstBeat;
-    const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
-    beats = grid.beats;
-    downbeats = grid.downbeats;
-  } else if (audioBeats.length >= 16) {
-    firstBeatTime = audioBeats[0];
-    beats = audioBeats;
-    // Assume 4/4; every 4th beat = downbeat
-    downbeats = beats.filter((_, i) => i % 4 === 0);
-  } else {
-    firstBeatTime = v2.firstBeatTime;
-    const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
-    beats = grid.beats;
-    downbeats = grid.downbeats;
-  }
+  // Beat grid.
+  //
+  // The grid is always synthesised from the reported tempo — only the phase
+  // anchor is chosen. Shipping the tracker's raw beat positions alongside a
+  // BPM computed some other way is how the grid and the number end up
+  // disagreeing (measured: beats spaced at 124.17 under a reported 123.42),
+  // and a deck syncs on the number while it plays against the grid. One
+  // tempo, one grid, by construction.
+  //
+  // Phase, best first: Serato's own anchor, the ironed constant region, the
+  // tracker's first beat, then the raw estimate.
+  const firstBeatTime = input.serato
+    ? input.serato.firstBeatSec
+    : ironed && bpm === audioBpm
+      ? ironed.firstBeat
+      : audioBeats.length >= 16
+        ? audioBeats[0]
+        : v2.firstBeatTime;
+  const grid = buildBeatGrid(firstBeatTime, bpm, input.durationSec);
+  const beats = grid.beats;
+  const downbeats = grid.downbeats;
   const isStable = checkBeatStability(beats);
 
   const beatGrid: BeatGrid = {

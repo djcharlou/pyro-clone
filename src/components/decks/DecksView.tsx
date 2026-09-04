@@ -16,6 +16,8 @@ interface Props {
   onSeek(side: 'A' | 'B', fraction: number): void;
   onCue(side: 'A' | 'B'): void;
   onPlayPause(side: 'A' | 'B'): void;
+  /** Why a deck refused the last track, if it did. */
+  notes?: { A: string | null; B: string | null };
 }
 
 const COLOR: Record<'A' | 'B', string> = { A: '#4fe3c1', B: '#ff8fb0' };
@@ -36,6 +38,7 @@ export function DecksView({
   onSeek,
   onCue,
   onPlayPause,
+  notes,
 }: Props): JSX.Element {
   // The audio graph is not React state, so repaint on a timer.
   const [, setTick] = useState(0);
@@ -107,7 +110,7 @@ export function DecksView({
           onCue={() => onCue(side)}
           onSync={() => handleSync(side)}
           onLoad={() => onLoadNext(side)}
-          syncNote={syncNote[side]}
+          syncNote={notes?.[side] ?? syncNote[side]}
           synced={Math.abs((deck?.getStretchRatio() ?? 1) - 1) > 0.0005}
         />
       </div>
